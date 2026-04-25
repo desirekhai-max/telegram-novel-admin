@@ -27,7 +27,7 @@ export default function LoginPage() {
         otp: otp.trim(),
       })
       saveAuth(authData.token, authData.username)
-      navigate('/dashboard', { replace: true })
+      navigate('/admin/dashboard', { replace: true })
     } catch (err) {
       setError(err?.message || '网络异常，请稍后重试')
     } finally {
@@ -38,8 +38,10 @@ export default function LoginPage() {
   return (
     <main className="admin-login-page">
       <div className="admin-login-card">
-        <h1 className="admin-login-title">系统后台登录</h1>
-        <p className="admin-login-sub">请输入账号、密码与 Google OTP</p>
+        <div className="admin-login-heading">
+          <h1 className="admin-login-title">系统后台登录</h1>
+          <p className="admin-login-sub">请输入账号、密码与 Google OTP</p>
+        </div>
 
         <form className="admin-login-form" onSubmit={onSubmit}>
           <input

@@ -3,6 +3,23 @@ import { fetchReports } from '../lib/adminApi.js'
 import { getToken } from '../lib/adminAuth.js'
 
 const REPORT_PREVIEW_LENGTH = 30
+const PAGE_SIZE = 50
+
+const EMPTY_FILTERS = {
+  novelTitle: '',
+  novelId: '',
+  userName: '',
+  from: '',
+  to: '',
+}
+
+const EXPORT_COLUMNS = [
+  { title: '举报时间', getValue: (row) => formatReportTime(row.at) },
+  { title: '小说ID', getValue: (row) => row.novelId || '-' },
+  { title: '小说标题', getValue: (row) => row.novelTitle || '-' },
+  { title: '举报用户', getValue: (row) => row.userName || '匿名' },
+  { title: '举报内容', getValue: (row) => String(row.text || '').trim() || '-' },
+]
 
 function formatReportTime(at) {
   const ms = Number(at)
@@ -17,6 +34,60 @@ function truncateReportText(text, maxLength = REPORT_PREVIEW_LENGTH) {
   return `${value.slice(0, maxLength)}...`
 }
 
+function parseDateTimeMs(value) {
+  const text = String(value || '').trim()
+  if (!text) return NaN
+  const matched = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/)
+  if (!matched) return NaN
+  const [, y, m, d, hh = '0', mm = '0', ss = '0'] = matched
+  return new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss)).getTime()
+}
+
+function includesText(source, keyword) {
+  const key = String(keyword || '').trim().toLowerCase()
+  if (!key) return true
+  return String(source || '').toLowerCase().includes(key)
+}
+
+function matchNovelId(rowId, filterId) {
+  const key = String(filterId || '').trim()
+  if (!key) return true
+  return String(rowId || '').trim() === key
+}
+
+function filterRows(rows, filters) {
+  const fromMs = parseDateTimeMs(filters.from)
+  const toMs = parseDateTimeMs(filters.to)
+
+  return rows.filter((row) => {
+    if (!includesText(row.novelTitle, filters.novelTitle)) return false
+    if (!matchNovelId(row.novelId, filters.novelId)) return false
+    if (!includesText(row.userName, filters.userName)) return false
+
+    const rowMs = Number(row.at)
+    if (Number.isFinite(fromMs) && Number.isFinite(rowMs) && rowMs < fromMs) return false
+    if (Number.isFinite(toMs) && Number.isFinite(rowMs) && rowMs > toMs) return false
+    return true
+  })
+}
+
+function toCsv(rows) {
+  const escapeCell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
+  const head = EXPORT_COLUMNS.map((c) => c.title).join(',')
+  const lines = rows.map((row) => EXPORT_COLUMNS.map((c) => escapeCell(c.getValue(row))).join(','))
+  return [head, ...lines].join('\n')
+}
+
+function downloadCsv(filename, content) {
+  const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function shouldShowError(message) {
   const text = String(message || '').trim().toLowerCase()
   return text && text !== 'not found'
@@ -26,6 +97,9 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [rows, setRows] = useState([])
+  const [inputFilters, setInputFilters] = useState(EMPTY_FILTERS)
+  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS)
+  const [linkRefreshFlash, setLinkRefreshFlash] = useState(false)
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('1')
   const [selectedReport, setSelectedReport] = useState(null)
@@ -69,14 +143,23 @@ export default function ReportsPage() {
     return [...rows].sort((a, b) => Number(b?.at || 0) - Number(a?.at || 0))
   }, [rows])
 
-  const pageSize = 50
-  const total = sortedRows.length
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const filteredRows = useMemo(
+    () => filterRows(sortedRows, appliedFilters),
+    [sortedRows, appliedFilters],
+  )
+
+  const total = filteredRows.length
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
   const pagedRows = useMemo(() => {
-    const start = (currentPage - 1) * pageSize
-    return sortedRows.slice(start, start + pageSize)
-  }, [sortedRows, currentPage])
+    const start = (currentPage - 1) * PAGE_SIZE
+    return filteredRows.slice(start, start + PAGE_SIZE)
+  }, [filteredRows, currentPage])
+
+  useEffect(() => {
+    setPage(1)
+    setPageInput('1')
+  }, [appliedFilters])
 
   const clampPage = (n) => Math.min(totalPages, Math.max(1, Number(n) || 1))
   const applyPageInput = () => {
@@ -85,9 +168,77 @@ export default function ReportsPage() {
     setPageInput(String(next))
   }
 
+  const onQuery = () => {
+    setLinkRefreshFlash(true)
+    window.setTimeout(() => setLinkRefreshFlash(false), 140)
+    setAppliedFilters({ ...inputFilters })
+  }
+
+  const onReset = () => {
+    setInputFilters(EMPTY_FILTERS)
+    setAppliedFilters(EMPTY_FILTERS)
+  }
+
+  const onExport = () => {
+    downloadCsv('举报记录.csv', toCsv(filteredRows))
+  }
+
   return (
     <section className="admin-panel">
+      {linkRefreshFlash ? <div className="admin-link-refresh-flash" /> : null}
       {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
+
+      <div className="admin-tools admin-tools-wrap admin-reading-filters-row">
+        <label>
+          小说标题
+          <input
+            value={inputFilters.novelTitle}
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, novelTitle: e.target.value }))}
+          />
+        </label>
+        <label className="admin-label-short">
+          小说 ID
+          <input
+            value={inputFilters.novelId}
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, novelId: e.target.value }))}
+          />
+        </label>
+        <label className="admin-label-short">
+          举报用户
+          <input
+            value={inputFilters.userName}
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, userName: e.target.value }))}
+          />
+        </label>
+        <label>
+          开始日期时间
+          <input
+            value={inputFilters.from}
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, from: e.target.value }))}
+            placeholder="YYYY-MM-DD HH:mm:ss"
+          />
+        </label>
+        <label>
+          结束日期时间
+          <input
+            value={inputFilters.to}
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, to: e.target.value }))}
+            placeholder="YYYY-MM-DD HH:mm:ss"
+          />
+        </label>
+      </div>
+
+      <div className="admin-tools admin-tools-wrap admin-tools-actions">
+        <button className="admin-btn admin-btn-primary" type="button" onClick={onQuery}>
+          查询
+        </button>
+        <button className="admin-btn" type="button" onClick={onReset}>
+          重置
+        </button>
+        <button className="admin-btn admin-btn-primary" type="button" onClick={onExport}>
+          导出
+        </button>
+      </div>
 
       <div className="admin-table-wrap">
         <table className="admin-table admin-reports-table">

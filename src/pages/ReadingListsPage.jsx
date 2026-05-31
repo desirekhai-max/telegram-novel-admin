@@ -3,37 +3,39 @@ import { fetchReadingRecords } from '../lib/adminApi.js'
 import { getLegacyToken } from '../lib/adminAuth.js'
 import { getSettlementDateString } from '../lib/cambodiaTime.js'
 
-const DEFAULT_FROM_DATETIME = `${getSettlementDateString(0)} 09:00:00`
-const DEFAULT_TO_DATETIME = `${getSettlementDateString(1)} 09:00:00`
+const PAGE_SIZE = 50
+const DEFAULT_FROM = `${getSettlementDateString(0)} 09:00:00`
+const DEFAULT_TO = `${getSettlementDateString(1)} 09:00:00`
 
-const EMPTY_FILTERS = {
+function createDefaultInputFilters() {
+  return {
+    memberName: '',
+    memberAccount: '',
+    novelTitle: '',
+    from: DEFAULT_FROM,
+    to: DEFAULT_TO,
+  }
+}
+
+const EMPTY_APPLIED_FILTERS = {
   memberName: '',
-  memberId: '',
   memberAccount: '',
-  memberLevel: '',
-  memberOrder: '',
-  from: DEFAULT_FROM_DATETIME,
-  to: DEFAULT_TO_DATETIME,
-  shelfTitle: '',
+  novelTitle: '',
+  from: '',
+  to: '',
 }
 
 const EXPORT_COLUMNS = [
-  { title: '订单信息', getValue: (row) => row.memberOrder || '-' },
+  { title: '阅读时间', getValue: (row) => row.readAt || '-' },
   { title: '会员名称', getValue: (row) => row.memberName || '-' },
   { title: '会员ID', getValue: (row) => row.memberId || '-' },
   { title: '会员账号', getValue: (row) => row.memberAccount || row.username || row.account || '-' },
   { title: '会员等级', getValue: (row) => row.memberLevel || '-' },
-  { title: '书架题目', getValue: (row) => row.shelfTitle || '-' },
+  { title: '小说标题', getValue: (row) => row.shelfTitle || '-' },
   { title: '阅读章节', getValue: (row) => row.readChapter || '-' },
-  { title: '阅读时间', getValue: (row) => row.readAt || '-' },
 ]
 
-const MEMBER_LEVEL_OPTIONS = [
-  { value: '', label: '所有等级' },
-  { value: 'vip', label: 'VIP等级' },
-  { value: 'normal', label: '普通等级' },
-  { value: 'author', label: '作者等级' },
-]
+const LEGACY_UNAVAILABLE_MESSAGE = '阅读记录暂不可用，请联系管理员'
 
 function parseDateTimeMs(value) {
   const text = String(value || '').trim()
@@ -50,23 +52,14 @@ function includesText(source, keyword) {
   return String(source || '').toLowerCase().includes(key)
 }
 
-function matchMemberLevel(rowLevel, filterLevel) {
-  const level = String(filterLevel || '').trim().toLowerCase()
-  if (!level) return true
-  return String(rowLevel || '').toLowerCase().includes(level)
-}
-
 function filterRows(rows, filters) {
   const fromMs = parseDateTimeMs(filters.from)
   const toMs = parseDateTimeMs(filters.to)
 
   return rows.filter((row) => {
     if (!includesText(row.memberName, filters.memberName)) return false
-    if (!includesText(row.memberId, filters.memberId)) return false
     if (!includesText(row.memberAccount || row.username || row.account, filters.memberAccount)) return false
-    if (!matchMemberLevel(row.memberLevel, filters.memberLevel)) return false
-    if (!includesText(row.memberOrder, filters.memberOrder)) return false
-    if (!includesText(row.shelfTitle, filters.shelfTitle)) return false
+    if (!includesText(row.shelfTitle, filters.novelTitle)) return false
 
     const rowMs = Number(row.ts) || parseDateTimeMs(row.readAt)
     if (Number.isFinite(fromMs) && Number.isFinite(rowMs) && rowMs < fromMs) return false
@@ -97,12 +90,10 @@ function shouldShowError(message) {
   return text && text !== 'not found'
 }
 
-const LEGACY_UNAVAILABLE_MESSAGE = '阅读记录暂不可用，请联系管理员'
-
 export default function ReadingListsPage() {
   const hasLegacyToken = Boolean(getLegacyToken())
-  const [inputFilters, setInputFilters] = useState(EMPTY_FILTERS)
-  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS)
+  const [inputFilters, setInputFilters] = useState(createDefaultInputFilters)
+  const [appliedFilters, setAppliedFilters] = useState(EMPTY_APPLIED_FILTERS)
   const [linkRefreshFlash, setLinkRefreshFlash] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -134,15 +125,26 @@ export default function ReadingListsPage() {
     }
   }, [hasLegacyToken])
 
-  const rows = useMemo(() => filterRows(records, appliedFilters), [records, appliedFilters])
-  const pageSize = 50
-  const total = rows.length
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const sortedRows = useMemo(() => {
+    return [...records].sort((a, b) => {
+      const aMs = Number(a.ts) || parseDateTimeMs(a.readAt)
+      const bMs = Number(b.ts) || parseDateTimeMs(b.readAt)
+      return bMs - aMs
+    })
+  }, [records])
+
+  const filteredRows = useMemo(
+    () => filterRows(sortedRows, appliedFilters),
+    [sortedRows, appliedFilters],
+  )
+
+  const total = filteredRows.length
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
   const pagedRows = useMemo(() => {
-    const start = (currentPage - 1) * pageSize
-    return rows.slice(start, start + pageSize)
-  }, [rows, currentPage])
+    const start = (currentPage - 1) * PAGE_SIZE
+    return filteredRows.slice(start, start + PAGE_SIZE)
+  }, [filteredRows, currentPage])
 
   useEffect(() => {
     setPage(1)
@@ -157,10 +159,18 @@ export default function ReadingListsPage() {
   }
 
   const onQuery = () => {
-    if (!hasLegacyToken) return
     setLinkRefreshFlash(true)
     window.setTimeout(() => setLinkRefreshFlash(false), 140)
     setAppliedFilters({ ...inputFilters })
+  }
+
+  const onReset = () => {
+    setInputFilters(createDefaultInputFilters())
+    setAppliedFilters(EMPTY_APPLIED_FILTERS)
+  }
+
+  const onExport = () => {
+    downloadCsv('阅读记录.csv', toCsv(filteredRows))
   }
 
   if (!hasLegacyToken) {
@@ -177,143 +187,86 @@ export default function ReadingListsPage() {
   return (
     <section className="admin-panel">
       {linkRefreshFlash ? <div className="admin-link-refresh-flash" /> : null}
-      <div className="admin-tools admin-tools-wrap admin-reading-filters-row">
-        <label className="admin-label-short">
+      {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
+
+      <div className="admin-reports-filter-bar">
+        <label className="admin-reports-field admin-reports-field--title">
           会员名称
           <input
             value={inputFilters.memberName}
-            onChange={(e) =>
-              setInputFilters((prev) => ({ ...prev, memberName: e.target.value }))
-            }
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, memberName: e.target.value }))}
           />
         </label>
-        <label className="admin-label-short">
-          会员ID
-          <input
-            value={inputFilters.memberId}
-            onChange={(e) =>
-              setInputFilters((prev) => ({ ...prev, memberId: e.target.value }))
-            }
-          />
-        </label>
-        <label className="admin-label-short">
+        <label className="admin-reports-field admin-reports-field--user">
           会员账号
           <input
             value={inputFilters.memberAccount}
-            onChange={(e) =>
-              setInputFilters((prev) => ({ ...prev, memberAccount: e.target.value }))
-            }
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, memberAccount: e.target.value }))}
           />
         </label>
-        <label className="admin-reading-level-field">
-          会员等级
-          <select
-            value={inputFilters.memberLevel}
-            onChange={(e) =>
-              setInputFilters((prev) => ({ ...prev, memberLevel: e.target.value }))
-            }
-          >
-            {MEMBER_LEVEL_OPTIONS.map((item) => (
-              <option key={item.value || 'all'} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          订单信息
+        <label className="admin-reports-field admin-reports-field--title">
+          小说标题
           <input
-            value={inputFilters.memberOrder}
-            onChange={(e) =>
-              setInputFilters((prev) => ({ ...prev, memberOrder: e.target.value }))
-            }
+            value={inputFilters.novelTitle}
+            onChange={(e) => setInputFilters((prev) => ({ ...prev, novelTitle: e.target.value }))}
           />
         </label>
-        <label>
-          书架题目
-          <input
-            value={inputFilters.shelfTitle}
-            onChange={(e) =>
-              setInputFilters((prev) => ({ ...prev, shelfTitle: e.target.value }))
-            }
-          />
-        </label>
-        <label>
+        <label className="admin-reports-field admin-reports-field--datetime">
           开始日期时间
           <input
             value={inputFilters.from}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, from: e.target.value }))}
           />
         </label>
-        <label>
+        <label className="admin-reports-field admin-reports-field--datetime">
           结束日期时间
           <input
             value={inputFilters.to}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, to: e.target.value }))}
           />
         </label>
+        <div className="admin-reports-filter-actions">
+          <button className="admin-btn admin-btn-primary admin-reports-action-btn" type="button" onClick={onQuery}>
+            查询
+          </button>
+          <button className="admin-btn admin-reports-action-btn" type="button" onClick={onReset}>
+            重置
+          </button>
+          <button className="admin-btn admin-btn-primary admin-reports-action-btn" type="button" onClick={onExport}>
+            导出
+          </button>
+        </div>
       </div>
-
-      <div className="admin-tools admin-tools-wrap admin-tools-actions">
-        <button
-          className="admin-btn admin-btn-primary"
-          type="button"
-          onClick={onQuery}
-        >
-          查询
-        </button>
-        <button
-          className="admin-btn"
-          type="button"
-          onClick={() => {
-            setInputFilters(EMPTY_FILTERS)
-            setAppliedFilters(EMPTY_FILTERS)
-          }}
-        >
-          重置
-        </button>
-        <button
-          className="admin-btn admin-btn-primary"
-          type="button"
-          onClick={() => downloadCsv('阅读记录.csv', toCsv(rows))}
-        >
-          导出表格
-        </button>
-      </div>
-
-      {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
 
       <div className="admin-table-wrap">
-        <table className="admin-table">
+        <table className="admin-table admin-reports-table">
           <thead>
             <tr>
-              <th>订单信息</th>
+              <th>阅读时间</th>
               <th>会员名称</th>
               <th>会员ID</th>
               <th>会员账号</th>
               <th>会员等级</th>
-              <th>书架题目</th>
+              <th>小说标题</th>
               <th>阅读章节</th>
-              <th>阅读时间</th>
             </tr>
           </thead>
           <tbody>
             {pagedRows.length ? (
               pagedRows.map((row, idx) => (
                 <tr key={`${row.memberId || row.memberName || 'row'}-${row.ts || idx}`}>
-                  <td>{row.memberOrder || '-'}</td>
+                  <td>{row.readAt || '-'}</td>
                   <td>{row.memberName || '-'}</td>
                   <td>{row.memberId || '-'}</td>
                   <td>{row.memberAccount || row.username || row.account || '-'}</td>
                   <td>{row.memberLevel || '-'}</td>
-                  <td>{row.shelfTitle || '-'}</td>
+                  <td className="admin-report-title-cell">{row.shelfTitle || '-'}</td>
                   <td>{row.readChapter || '-'}</td>
-                  <td>{row.readAt || '-'}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="admin-table-empty">
+                <td colSpan={7} className="admin-table-empty">
                   {loading ? '加载中...' : '暂无记录'}
                 </td>
               </tr>
@@ -321,6 +274,7 @@ export default function ReadingListsPage() {
           </tbody>
         </table>
       </div>
+
       <div className="admin-pagination-row">
         <p className="admin-pagination-meta">共{total}条记录</p>
         <div className="admin-pagination-controls">
@@ -339,8 +293,7 @@ export default function ReadingListsPage() {
             className="admin-page-btn"
             type="button"
             onClick={() => {
-              const n = 1
-              setPage(n)
+              setPage(1)
               setPageInput('1')
             }}
             disabled={currentPage === 1}
@@ -378,9 +331,8 @@ export default function ReadingListsPage() {
             className="admin-page-btn"
             type="button"
             onClick={() => {
-              const n = totalPages
-              setPage(n)
-              setPageInput(String(n))
+              setPage(totalPages)
+              setPageInput(String(totalPages))
             }}
             disabled={currentPage === totalPages}
           >

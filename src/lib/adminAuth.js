@@ -45,6 +45,10 @@ async function loginLegacyAdmin({ username, password, otp }) {
   })
 
   const data = await parseJsonSafe(response)
+
+  console.log('LEGACY LOGIN STATUS:', response.status)
+  console.log('LEGACY LOGIN RESPONSE:', data)
+
   if (!response.ok || !data?.ok || !data?.token) {
     throw new Error(data?.error || 'Legacy 管理员登录失败')
   }
@@ -68,7 +72,15 @@ export async function loginAdmin({ username, password, otp }) {
       response,
       data: await parseJsonSafe(response),
     })),
-    loginLegacyAdmin(credentials).catch(() => ''),
+    loginLegacyAdmin(credentials)
+      .then((token) => {
+        console.log('LEGACY TOKEN SUCCESS:', token)
+        return token
+      })
+      .catch((error) => {
+        console.log('LEGACY LOGIN FAILED:', error)
+        return ''
+      }),
   ])
 
   const { response, data } = adminResponse

@@ -1,0 +1,53 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7DB8FF"/>
+      <stop offset="1" stop-color="#4F7FFF"/>
+    </linearGradient>
+    <clipPath id="clipCircle">
+      <circle cx="128" cy="128" r="120"/>
+    </clipPath>
+  </defs>
+
+  <rect width="256" height="256" fill="url(#bg)"/>
+  <g clip-path="url(#clipCircle)">
+    <circle cx="128" cy="128" r="120" fill="url(#bg)"/>
+
+    <!-- shoulders -->
+    <ellipse cx="128" cy="226" rx="86" ry="54" fill="#EAF2FF"/>
+    <ellipse cx="128" cy="232" rx="68" ry="40" fill="#DCE8FF"/>
+
+    <!-- neck -->
+    <rect x="110" y="154" width="36" height="28" rx="12" fill="#FFD8B4"/>
+
+    <!-- face -->
+    <ellipse cx="128" cy="122" rx="58" ry="60" fill="#FFE2C2"/>
+
+    <!-- hair -->
+    <path d="M72 118C72 78 96 56 128 56C160 56 184 78 184 118V94C184 70 164 50 128 50C92 50 72 70 72 94V118Z" fill="#243B73"/>
+    <path d="M82 94C92 80 108 74 128 74C148 74 164 80 174 94C170 74 156 60 128 60C100 60 86 74 82 94Z" fill="#2D4A8F"/>
+
+    <!-- ears -->
+    <circle cx="74" cy="124" r="10" fill="#FFD8B4"/>
+    <circle cx="182" cy="124" r="10" fill="#FFD8B4"/>
+
+    <!-- eyes -->
+    <ellipse cx="106" cy="122" rx="7" ry="8" fill="#243B73"/>
+    <ellipse cx="150" cy="122" rx="7" ry="8" fill="#243B73"/>
+    <circle cx="108" cy="120" r="2" fill="#FFFFFF"/>
+    <circle cx="152" cy="120" r="2" fill="#FFFFFF"/>
+
+    <!-- nose -->
+    <path d="M127 126C124 132 124 136 128 138C132 136 132 132 129 126" fill="#F1BE92"/>
+
+    <!-- smile -->
+    <path d="M108 146C112 154 120 158 128 158C136 158 144 154 148 146" stroke="#D06B60" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- shirt -->
+    <path d="M76 234C80 200 98 184 128 184C158 184 176 200 180 234H76Z" fill="#FFFFFF"/>
+    <path d="M114 184H142L128 200L114 184Z" fill="#4F7FFF"/>
+  </g>
+
+  <!-- outer ring -->
+  <circle cx="128" cy="128" r="120" stroke="#FFFFFF" stroke-width="8"/>
+</svg>

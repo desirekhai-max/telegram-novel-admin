@@ -97,7 +97,10 @@ function shouldShowError(message) {
   return text && text !== 'not found'
 }
 
+const LEGACY_UNAVAILABLE_MESSAGE = '阅读记录暂不可用，请联系管理员'
+
 export default function ReadingListsPage() {
+  const hasLegacyToken = Boolean(getLegacyToken())
   const [inputFilters, setInputFilters] = useState(EMPTY_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS)
   const [linkRefreshFlash, setLinkRefreshFlash] = useState(false)
@@ -108,16 +111,14 @@ export default function ReadingListsPage() {
   const [pageInput, setPageInput] = useState('1')
 
   useEffect(() => {
+    if (!hasLegacyToken) return undefined
+
     let stop = false
     const load = async () => {
       setLoading(true)
       setError('')
       try {
-        const token = getLegacyToken()
-        if (!token) {
-          throw new Error('阅读记录登录凭证缺失，请重新登录')
-        }
-        const rows = await fetchReadingRecords({ token })
+        const rows = await fetchReadingRecords({ token: getLegacyToken() })
         if (!stop) setRecords(rows)
       } catch (err) {
         if (!stop) setError(err?.message || '读取阅读记录失败')
@@ -131,7 +132,7 @@ export default function ReadingListsPage() {
       stop = true
       window.clearInterval(timer)
     }
-  }, [])
+  }, [hasLegacyToken])
 
   const rows = useMemo(() => filterRows(records, appliedFilters), [records, appliedFilters])
   const pageSize = 50
@@ -156,9 +157,21 @@ export default function ReadingListsPage() {
   }
 
   const onQuery = () => {
+    if (!hasLegacyToken) return
     setLinkRefreshFlash(true)
     window.setTimeout(() => setLinkRefreshFlash(false), 140)
     setAppliedFilters({ ...inputFilters })
+  }
+
+  if (!hasLegacyToken) {
+    return (
+      <section className="admin-panel">
+        <div className="admin-placeholder">
+          <h3>阅读记录</h3>
+          <p>{LEGACY_UNAVAILABLE_MESSAGE}</p>
+        </div>
+      </section>
+    )
   }
 
   return (

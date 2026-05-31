@@ -23,6 +23,8 @@ export function saveAuth(token, username, legacyToken) {
   sessionStorage.setItem(TOKEN_KEY, token)
   if (legacyToken) {
     sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
+  } else {
+    sessionStorage.removeItem(LEGACY_TOKEN_KEY)
   }
   if (username) {
     sessionStorage.setItem(USERNAME_KEY, username)
@@ -74,13 +76,9 @@ export async function loginAdmin({ username, password, otp }) {
     throw new Error(data?.error || '账号、密码或动态码错误')
   }
 
-  if (!legacyToken) {
-    throw new Error('阅读记录接口登录失败，请稍后重试')
-  }
-
   return {
     token: data.token,
-    legacyToken,
+    legacyToken: legacyToken || '',
     username: data.username || data.user?.username || credentials.username,
   }
 }

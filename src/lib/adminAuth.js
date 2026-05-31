@@ -27,16 +27,9 @@ export function saveAuth(token, username, legacyToken) {
   })
 
   sessionStorage.setItem(TOKEN_KEY, token)
-  if (legacyToken !== undefined) {
-    if (legacyToken) {
-      sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
-      console.log('SAVE AUTH legacy setItem executed', LEGACY_TOKEN_KEY, legacyToken)
-    } else {
-      sessionStorage.removeItem(LEGACY_TOKEN_KEY)
-      console.log('SAVE AUTH legacy removeItem executed', LEGACY_TOKEN_KEY)
-    }
-  } else {
-    console.log('SAVE AUTH legacy skipped (legacyToken undefined, keep existing)')
+  if (legacyToken) {
+    sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
+    console.log('SAVE AUTH legacy setItem executed', LEGACY_TOKEN_KEY, legacyToken)
   }
   if (username) {
     sessionStorage.setItem(USERNAME_KEY, username)
@@ -76,29 +69,23 @@ export async function loginAdmin({ username, password, otp }) {
     otp: String(otp || '').trim(),
   }
 
-  const [adminResponse, legacyToken] = await Promise.all([
-    fetch(`${API_BASE}/api/admin/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credentials),
-    }).then(async (response) => ({
-      response,
-      data: await parseJsonSafe(response),
-    })),
-    loginLegacyAdmin(credentials)
-      .then((token) => {
-        console.log('LEGACY TOKEN SUCCESS:', token)
-        return token
-      })
-      .catch((error) => {
-        console.log('LEGACY LOGIN FAILED:', error)
-        return ''
-      }),
-  ])
+  const adminResponse = await fetch(`${API_BASE}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials),
+  })
 
-  const { response, data } = adminResponse
-  if (!response.ok || !data?.token) {
+  const data = await parseJsonSafe(adminResponse)
+  if (!adminResponse.ok || !data?.token) {
     throw new Error(data?.error || '账号、密码或动态码错误')
+  }
+
+  let legacyToken = ''
+  try {
+    legacyToken = await loginLegacyAdmin(credentials)
+    console.log('LEGACY TOKEN SUCCESS:', legacyToken)
+  } catch (error) {
+    console.log('LEGACY LOGIN FAILED:', error)
   }
 
   console.log('LEGACY TOKEN VALUE', legacyToken)

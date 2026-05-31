@@ -36,7 +36,8 @@ export default function DashboardPage() {
       }
 
       if (session.username) {
-        saveAuth(token, session.username, getLegacyToken())
+        const existingLegacy = getLegacyToken()
+        saveAuth(token, session.username, existingLegacy || undefined)
         setUsername(session.username)
       }
 

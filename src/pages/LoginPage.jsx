@@ -27,6 +27,7 @@ export default function LoginPage() {
         password: password.trim(),
         otp: otp.trim(),
       })
+      console.log('LOGIN PAGE authData.legacyToken', authData.legacyToken)
       saveAuth(authData.token, authData.username, authData.legacyToken)
       navigate('/admin/dashboard', { replace: true })
     } catch (err) {

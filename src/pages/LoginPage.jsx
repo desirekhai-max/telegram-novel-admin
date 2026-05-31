@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [otp, setOtp] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const onSubmit = async (e) => {
     e.preventDefault()
@@ -26,7 +27,7 @@ export default function LoginPage() {
         password: password.trim(),
         otp: otp.trim(),
       })
-      saveAuth(authData.token, authData.username)
+      saveAuth(authData.token, authData.username, authData.legacyToken)
       navigate('/admin/dashboard', { replace: true })
     } catch (err) {
       setError(err?.message || '网络异常，请稍后重试')
@@ -50,13 +51,23 @@ export default function LoginPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
-          <input
-            className="admin-input"
-            type="password"
-            placeholder="密码"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <div className="admin-password-wrap">
+            <input
+              className="admin-input admin-password-input"
+              type={showPassword ? 'text' : 'password'}
+              placeholder="密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              className="admin-password-toggle"
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+            >
+              {showPassword ? '🙈' : '👁'}
+            </button>
+          </div>
           <input
             className="admin-input"
             placeholder="OTP（6位数字）"

@@ -46,8 +46,7 @@ export default function DashboardPage() {
   }, [navigate])
 
   const onLogout = async () => {
-    const token = getToken()
-    await logoutAdmin(token)
+    await logoutAdmin()
     clearAuth()
     navigate('/login', { replace: true })
   }

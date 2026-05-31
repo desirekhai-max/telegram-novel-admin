@@ -27,23 +27,64 @@ async function requestJson(path, { token, method = 'GET', body, query } = {}) {
   return data
 }
 
-export async function fetchHomeStats({ token, from, to }) {
-  return requestJson('/api/presence/home-stats', {
-    token,
-    query: { from, to },
-  })
+export function extractItems(data) {
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.records)) return data.records
+  if (Array.isArray(data)) return data
+  return []
 }
 
-export async function fetchReadingRecords({ token, filters }) {
-  return requestJson('/api/reading-records/list', {
-    token,
-    query: filters,
+function buildPresenceQuery({ from, to } = {}) {
+  const fromText = String(from || '').trim()
+  const toText = String(to || '').trim()
+  if (fromText && toText && fromText !== toText) {
+    return { start: fromText, end: toText }
+  }
+  if (fromText) {
+    return { date: fromText }
+  }
+  return {}
+}
+
+export async function fetchPresenceStats({ from, to } = {}) {
+  const data = await requestJson('/api/presence/online', {
+    query: buildPresenceQuery({ from, to }),
   })
+  return data?.counts || {}
+}
+
+/** @deprecated Use fetchPresenceStats */
+export async function fetchHomeStats({ from, to }) {
+  return fetchPresenceStats({ from, to })
+}
+
+export async function fetchReports({ token }) {
+  const data = await requestJson('/api/admin/reports', { token })
+  return extractItems(data)
+}
+
+export async function fetchReadingRecords({ token }) {
+  const data = await requestJson('/api/admin-legacy/reading-records', { token })
+  return extractItems(data)
 }
 
 export async function fetchOrders({ token, from, to }) {
   return requestJson('/api/orders', {
     token,
     query: { from, to },
+  })
+}
+
+export async function fetchUsers({ token }) {
+  return requestJson('/api/users', {
+    token,
+  })
+}
+
+export async function updateUserFlags({ token, userId, patch }) {
+  return requestJson(`/api/users/${encodeURIComponent(String(userId))}/flags`, {
+    token,
+    method: 'PATCH',
+    body: patch,
   })
 }

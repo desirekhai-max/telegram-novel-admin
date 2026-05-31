@@ -414,6 +414,63 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
   word-break: break-word;
 }
 
+.admin-reports-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.admin-reports-filter-bar label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #4d5d82;
+}
+
+.admin-reports-field input {
+  box-sizing: border-box;
+  height: 36px;
+  border: 1px solid #c9d6f3;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #173877;
+  background: #fff;
+}
+
+.admin-reports-field--title input,
+.admin-reports-field--user input {
+  width: 300px;
+}
+
+.admin-reports-field--id input {
+  width: 120px;
+}
+
+.admin-reports-field--datetime input {
+  width: 210px;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-reports-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+}
+
+.admin-reports-action-btn {
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  padding: 0 16px;
+  font-size: 13px;
+  line-height: 36px;
+}
+
 .admin-panel {
   background: #fff;
   border-radius: 14px;

@@ -1,11 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchReports } from '../lib/adminApi.js'
 import { getToken } from '../lib/adminAuth.js'
+import { getSettlementDateString } from '../lib/cambodiaTime.js'
 
 const REPORT_PREVIEW_LENGTH = 30
 const PAGE_SIZE = 50
 
-const EMPTY_FILTERS = {
+const DEFAULT_FROM = `${getSettlementDateString(0)} 09:00:00`
+const DEFAULT_TO = `${getSettlementDateString(1)} 09:00:00`
+
+function createDefaultInputFilters() {
+  return {
+    novelTitle: '',
+    novelId: '',
+    userName: '',
+    from: DEFAULT_FROM,
+    to: DEFAULT_TO,
+  }
+}
+
+const EMPTY_APPLIED_FILTERS = {
   novelTitle: '',
   novelId: '',
   userName: '',
@@ -97,8 +111,8 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [rows, setRows] = useState([])
-  const [inputFilters, setInputFilters] = useState(EMPTY_FILTERS)
-  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS)
+  const [inputFilters, setInputFilters] = useState(createDefaultInputFilters)
+  const [appliedFilters, setAppliedFilters] = useState(EMPTY_APPLIED_FILTERS)
   const [linkRefreshFlash, setLinkRefreshFlash] = useState(false)
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('1')
@@ -175,8 +189,8 @@ export default function ReportsPage() {
   }
 
   const onReset = () => {
-    setInputFilters(EMPTY_FILTERS)
-    setAppliedFilters(EMPTY_FILTERS)
+    setInputFilters(createDefaultInputFilters())
+    setAppliedFilters(EMPTY_APPLIED_FILTERS)
   }
 
   const onExport = () => {
@@ -188,56 +202,53 @@ export default function ReportsPage() {
       {linkRefreshFlash ? <div className="admin-link-refresh-flash" /> : null}
       {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
 
-      <div className="admin-tools admin-tools-wrap admin-reading-filters-row">
-        <label>
+      <div className="admin-reports-filter-bar">
+        <label className="admin-reports-field admin-reports-field--title">
           小说标题
           <input
             value={inputFilters.novelTitle}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, novelTitle: e.target.value }))}
           />
         </label>
-        <label className="admin-label-short">
+        <label className="admin-reports-field admin-reports-field--id">
           小说 ID
           <input
             value={inputFilters.novelId}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, novelId: e.target.value }))}
           />
         </label>
-        <label className="admin-label-short">
+        <label className="admin-reports-field admin-reports-field--user">
           举报用户
           <input
             value={inputFilters.userName}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, userName: e.target.value }))}
           />
         </label>
-        <label>
+        <label className="admin-reports-field admin-reports-field--datetime">
           开始日期时间
           <input
             value={inputFilters.from}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, from: e.target.value }))}
-            placeholder="YYYY-MM-DD HH:mm:ss"
           />
         </label>
-        <label>
+        <label className="admin-reports-field admin-reports-field--datetime">
           结束日期时间
           <input
             value={inputFilters.to}
             onChange={(e) => setInputFilters((prev) => ({ ...prev, to: e.target.value }))}
-            placeholder="YYYY-MM-DD HH:mm:ss"
           />
         </label>
-      </div>
-
-      <div className="admin-tools admin-tools-wrap admin-tools-actions">
-        <button className="admin-btn admin-btn-primary" type="button" onClick={onQuery}>
-          查询
-        </button>
-        <button className="admin-btn" type="button" onClick={onReset}>
-          重置
-        </button>
-        <button className="admin-btn admin-btn-primary" type="button" onClick={onExport}>
-          导出
-        </button>
+        <div className="admin-reports-filter-actions">
+          <button className="admin-btn admin-btn-primary admin-reports-action-btn" type="button" onClick={onQuery}>
+            查询
+          </button>
+          <button className="admin-btn admin-reports-action-btn" type="button" onClick={onReset}>
+            重置
+          </button>
+          <button className="admin-btn admin-btn-primary admin-reports-action-btn" type="button" onClick={onExport}>
+            导出
+          </button>
+        </div>
       </div>
 
       <div className="admin-table-wrap">

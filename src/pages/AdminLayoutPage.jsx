@@ -5,6 +5,7 @@ import {
   fetchAdminSession,
   getStoredUsername,
   getToken,
+  getLegacyToken,
   logoutAdmin,
   saveAuth,
 } from '../lib/adminAuth.js'
@@ -58,7 +59,7 @@ export default function AdminLayoutPage() {
           return
         }
         if (session.username) {
-          saveAuth(token, session.username)
+          saveAuth(token, session.username, getLegacyToken())
           setUsername(session.username)
         }
       } catch {

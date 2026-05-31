@@ -20,11 +20,23 @@ export function getStoredUsername() {
 }
 
 export function saveAuth(token, username, legacyToken) {
+  console.log('SAVE AUTH', {
+    token,
+    username,
+    legacyToken,
+  })
+
   sessionStorage.setItem(TOKEN_KEY, token)
-  if (legacyToken) {
-    sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
+  if (legacyToken !== undefined) {
+    if (legacyToken) {
+      sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
+      console.log('SAVE AUTH legacy setItem executed', LEGACY_TOKEN_KEY, legacyToken)
+    } else {
+      sessionStorage.removeItem(LEGACY_TOKEN_KEY)
+      console.log('SAVE AUTH legacy removeItem executed', LEGACY_TOKEN_KEY)
+    }
   } else {
-    sessionStorage.removeItem(LEGACY_TOKEN_KEY)
+    console.log('SAVE AUTH legacy skipped (legacyToken undefined, keep existing)')
   }
   if (username) {
     sessionStorage.setItem(USERNAME_KEY, username)
@@ -46,13 +58,14 @@ async function loginLegacyAdmin({ username, password, otp }) {
 
   const data = await parseJsonSafe(response)
 
-  console.log('LEGACY LOGIN STATUS:', response.status)
-  console.log('LEGACY LOGIN RESPONSE:', data)
+  console.log('LEGACY LOGIN STATUS', response.status)
+  console.log('LEGACY LOGIN RESPONSE', data)
 
   if (!response.ok || !data?.ok || !data?.token) {
     throw new Error(data?.error || 'Legacy 管理员登录失败')
   }
 
+  console.log('LEGACY LOGIN RETURN TOKEN', data.token)
   return data.token
 }
 
@@ -87,6 +100,13 @@ export async function loginAdmin({ username, password, otp }) {
   if (!response.ok || !data?.token) {
     throw new Error(data?.error || '账号、密码或动态码错误')
   }
+
+  console.log('LEGACY TOKEN VALUE', legacyToken)
+  console.log('LOGIN RETURN', {
+    token: data.token,
+    legacyToken,
+    username: data.username || data.user?.username || credentials.username,
+  })
 
   return {
     token: data.token,

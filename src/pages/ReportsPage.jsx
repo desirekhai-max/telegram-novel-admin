@@ -2,10 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchReports } from '../lib/adminApi.js'
 import { getToken } from '../lib/adminAuth.js'
 
+const REPORT_PREVIEW_LENGTH = 30
+
 function formatReportTime(at) {
   const ms = Number(at)
   if (!Number.isFinite(ms) || ms <= 0) return '—'
   return new Date(ms).toLocaleString('zh-CN', { hour12: false })
+}
+
+function truncateReportText(text, maxLength = REPORT_PREVIEW_LENGTH) {
+  const value = String(text || '').trim()
+  if (!value) return '—'
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength)}...`
 }
 
 function shouldShowError(message) {
@@ -19,6 +28,7 @@ export default function ReportsPage() {
   const [rows, setRows] = useState([])
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('1')
+  const [selectedReport, setSelectedReport] = useState(null)
 
   useEffect(() => {
     let stop = false
@@ -46,6 +56,15 @@ export default function ReportsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!selectedReport) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setSelectedReport(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [selectedReport])
+
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => Number(b?.at || 0) - Number(a?.at || 0))
   }, [rows])
@@ -71,7 +90,7 @@ export default function ReportsPage() {
       {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
 
       <div className="admin-table-wrap">
-        <table className="admin-table">
+        <table className="admin-table admin-reports-table">
           <thead>
             <tr>
               <th>举报时间</th>
@@ -79,6 +98,7 @@ export default function ReportsPage() {
               <th>小说标题</th>
               <th>举报用户</th>
               <th>举报内容</th>
+              <th className="admin-reports-action-col">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -87,14 +107,23 @@ export default function ReportsPage() {
                 <tr key={`${row.id || row.at || 'report'}-${idx}`}>
                   <td>{formatReportTime(row.at)}</td>
                   <td>{row.novelId || '—'}</td>
-                  <td>{row.novelTitle || '—'}</td>
+                  <td className="admin-report-title-cell">{row.novelTitle || '—'}</td>
                   <td>{row.userName || '匿名'}</td>
-                  <td>{row.text || '—'}</td>
+                  <td className="admin-report-content-cell">{truncateReportText(row.text)}</td>
+                  <td className="admin-reports-action-col">
+                    <button
+                      className="admin-btn admin-report-view-btn"
+                      type="button"
+                      onClick={() => setSelectedReport(row)}
+                    >
+                      查看
+                    </button>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={5} className="admin-table-empty">
+                <td colSpan={6} className="admin-table-empty">
                   {loading ? '加载中...' : '暂无举报记录'}
                 </td>
               </tr>
@@ -168,6 +197,56 @@ export default function ReportsPage() {
           </button>
         </div>
       </div>
+
+      {selectedReport ? (
+        <div
+          className="admin-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-report-detail-title"
+          onClick={() => setSelectedReport(null)}
+        >
+          <div
+            className="admin-modal-card admin-modal-card--report"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="admin-modal-title" id="admin-report-detail-title">
+              举报详情
+            </p>
+            <dl className="admin-report-detail-meta">
+              <div>
+                <dt>举报时间</dt>
+                <dd>{formatReportTime(selectedReport.at)}</dd>
+              </div>
+              <div>
+                <dt>小说 ID</dt>
+                <dd>{selectedReport.novelId || '—'}</dd>
+              </div>
+              <div>
+                <dt>小说标题</dt>
+                <dd>{selectedReport.novelTitle || '—'}</dd>
+              </div>
+              <div>
+                <dt>举报用户</dt>
+                <dd>{selectedReport.userName || '匿名'}</dd>
+              </div>
+            </dl>
+            <p className="admin-report-detail-label">举报内容</p>
+            <div className="admin-report-detail-body">
+              {String(selectedReport.text || '').trim() || '—'}
+            </div>
+            <div className="admin-modal-actions">
+              <button
+                className="admin-btn admin-btn-primary"
+                type="button"
+                onClick={() => setSelectedReport(null)}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

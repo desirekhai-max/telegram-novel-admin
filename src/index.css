@@ -452,6 +452,7 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
 .admin-reports-field--datetime input {
   width: 210px;
   font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .admin-reports-filter-actions {
@@ -459,6 +460,7 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
   align-items: center;
   gap: 8px;
   height: 36px;
+  margin-left: auto;
 }
 
 .admin-reports-action-btn {

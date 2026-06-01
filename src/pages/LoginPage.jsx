@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { loginAdmin, saveAuth } from '../lib/adminAuth.js'
+import { clearAuth, loginAdmin, saveAuth, verifyLegacyTokenInSession } from '../lib/adminAuth.js'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -27,10 +27,26 @@ export default function LoginPage() {
         password: password.trim(),
         otp: otp.trim(),
       })
-      console.log('LOGIN PAGE authData.legacyToken', authData.legacyToken)
+
+      if (!authData.token || !authData.legacyToken) {
+        clearAuth()
+        setError('登录失败：未同时获取 admin_token 与 admin_legacy_token')
+        return
+      }
+
       saveAuth(authData.token, authData.username, authData.legacyToken)
+
+      try {
+        verifyLegacyTokenInSession()
+      } catch (verifyErr) {
+        clearAuth()
+        setError(verifyErr?.message || '登录未完成，请重新登录')
+        return
+      }
+
       navigate('/admin/dashboard', { replace: true })
     } catch (err) {
+      clearAuth()
       setError(err?.message || '网络异常，请稍后重试')
     } finally {
       setLoading(false)
@@ -42,7 +58,7 @@ export default function LoginPage() {
       <div className="admin-login-card">
         <div className="admin-login-heading">
           <h1 className="admin-login-title">系统后台登录</h1>
-          <p className="admin-login-sub">请输入账号、密码与 Google OTP</p>
+          <p className="admin-login-sub">请输入账号、密码与 Google OTP（须同时通过主站与 Legacy 登录）</p>
         </div>
 
         <form className="admin-login-form" onSubmit={onSubmit}>

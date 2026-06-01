@@ -15,21 +15,29 @@ export function getLegacyToken() {
   return sessionStorage.getItem(LEGACY_TOKEN_KEY) || ''
 }
 
+export function hasLegacyToken() {
+  return Boolean(getLegacyToken())
+}
+
 export function getStoredUsername() {
   return sessionStorage.getItem(USERNAME_KEY) || ''
 }
 
+/**
+ * @param {string} token - admin_token
+ * @param {string} username
+ * @param {string | undefined} legacyToken - admin_legacy_token；传 undefined 表示不修改已有 Legacy
+ */
 export function saveAuth(token, username, legacyToken) {
-  console.log('SAVE AUTH', {
-    token,
-    username,
-    legacyToken,
-  })
-
-  sessionStorage.setItem(TOKEN_KEY, token)
-  if (legacyToken) {
-    sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
-    console.log('SAVE AUTH legacy setItem executed', LEGACY_TOKEN_KEY, legacyToken)
+  if (token) {
+    sessionStorage.setItem(TOKEN_KEY, token)
+  }
+  if (legacyToken !== undefined) {
+    if (legacyToken) {
+      sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
+    } else {
+      sessionStorage.removeItem(LEGACY_TOKEN_KEY)
+    }
   }
   if (username) {
     sessionStorage.setItem(USERNAME_KEY, username)
@@ -42,6 +50,14 @@ export function clearAuth() {
   sessionStorage.removeItem(USERNAME_KEY)
 }
 
+export function verifyLegacyTokenInSession() {
+  const legacy = sessionStorage.getItem(LEGACY_TOKEN_KEY)
+  if (!legacy) {
+    throw new Error('登录未完成：sessionStorage 中未找到 admin_legacy_token，请重新登录')
+  }
+  return legacy
+}
+
 async function loginLegacyAdmin({ username, password, otp }) {
   const response = await fetch(`${API_BASE}/api/admin-legacy/login`, {
     method: 'POST',
@@ -51,14 +67,10 @@ async function loginLegacyAdmin({ username, password, otp }) {
 
   const data = await parseJsonSafe(response)
 
-  console.log('LEGACY LOGIN STATUS', response.status)
-  console.log('LEGACY LOGIN RESPONSE', data)
-
   if (!response.ok || !data?.ok || !data?.token) {
     throw new Error(data?.error || 'Legacy 管理员登录失败')
   }
 
-  console.log('LEGACY LOGIN RETURN TOKEN', data.token)
   return data.token
 }
 
@@ -83,21 +95,24 @@ export async function loginAdmin({ username, password, otp }) {
   let legacyToken = ''
   try {
     legacyToken = await loginLegacyAdmin(credentials)
-    console.log('LEGACY TOKEN SUCCESS:', legacyToken)
+    console.log('Legacy Login Success')
   } catch (error) {
-    console.log('LEGACY LOGIN FAILED:', error)
+    console.log('Legacy Login Failed', error?.message || error)
+    throw new Error(
+      error?.message
+        ? `Legacy 登录失败：${error.message}。请确认账号、密码、OTP 正确，且具备 Legacy 权限后重试。`
+        : 'Legacy 登录失败，请确认账号具备 Legacy 权限后重试。',
+    )
   }
 
-  console.log('LEGACY TOKEN VALUE', legacyToken)
-  console.log('LOGIN RETURN', {
-    token: data.token,
-    legacyToken,
-    username: data.username || data.user?.username || credentials.username,
-  })
+  if (!legacyToken) {
+    console.log('Legacy Login Failed', 'empty token')
+    throw new Error('Legacy 登录失败：未返回有效 Token，请稍后重试。')
+  }
 
   return {
     token: data.token,
-    legacyToken: legacyToken || '',
+    legacyToken,
     username: data.username || data.user?.username || credentials.username,
   }
 }

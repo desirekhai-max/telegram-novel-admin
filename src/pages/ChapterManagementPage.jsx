@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getLegacyToken } from '../lib/adminAuth.js'
+import { hasLegacyToken } from '../lib/adminAuth.js'
+import LegacyRequiredNotice from '../components/LegacyRequiredNotice.jsx'
 import {
   createAdminChapter,
   deleteAdminChapter,
@@ -10,8 +11,6 @@ import {
 } from '../lib/novelsAdminApi.js'
 
 const PAGE_SIZE = 20
-const LEGACY_MSG = '章节管理需要 Legacy 管理员权限，请使用可获取 Legacy Token 的账号重新登录。'
-
 const EMPTY_FORM = {
   novelId: '',
   title: '',
@@ -26,7 +25,7 @@ function formatMs(ms) {
 }
 
 export default function ChapterManagementPage() {
-  const hasLegacy = Boolean(getLegacyToken())
+  const hasLegacy = hasLegacyToken()
   const [novelOptions, setNovelOptions] = useState([])
   const [novelFilter, setNovelFilter] = useState('')
   const [search, setSearch] = useState('')
@@ -167,11 +166,7 @@ export default function ChapterManagementPage() {
   const pagedHint = useMemo(() => `共 ${total} 条`, [total])
 
   if (!hasLegacy) {
-    return (
-      <section className="admin-panel">
-        <p className="admin-error">{LEGACY_MSG}</p>
-      </section>
-    )
+    return <LegacyRequiredNotice />
   }
 
   return (

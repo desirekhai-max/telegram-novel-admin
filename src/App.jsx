@@ -7,6 +7,8 @@ import OrdersPage from './pages/OrdersPage.jsx'
 import UserManagementPage from './pages/UserManagementPage.jsx'
 import AccountProfilePage from './pages/AccountProfilePage.jsx'
 import PlaceholderPage from './pages/PlaceholderPage.jsx'
+import NovelManagementPage from './pages/NovelManagementPage.jsx'
+import ChapterManagementPage from './pages/ChapterManagementPage.jsx'
 import ReportsPage from './pages/ReportsPage.jsx'
 import { getToken } from './lib/adminAuth.js'
 
@@ -36,15 +38,9 @@ export default function App() {
         <Route path="lists" element={<ReadingListsPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="users" element={<UserManagementPage />} />
-        <Route
-          path="finance"
-          element={<PlaceholderPage title="小说管理" message="小说管理功能开发中..." />}
-        />
+        <Route path="finance" element={<NovelManagementPage />} />
         <Route path="account" element={<AccountProfilePage />} />
-        <Route
-          path="stats"
-          element={<PlaceholderPage title="章节管理" message="章节管理功能开发中..." />}
-        />
+        <Route path="stats" element={<ChapterManagementPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<PlaceholderPage title="设置" />} />
       </Route>

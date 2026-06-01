@@ -54,6 +54,49 @@ export async function deleteAdminNovel(id) {
   })
 }
 
+export async function uploadNovelCover({ dataUrl, previousCoverUrl = '' }) {
+  const token = getLegacyToken()
+  if (!token) throw new Error('需要 Legacy 管理员权限，请重新登录')
+
+  const response = await fetch(`${API_BASE}/api/admin-legacy/novels/cover-upload`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      dataUrl,
+      previousCoverUrl: previousCoverUrl || undefined,
+    }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data?.error || `上传失败(${response.status})`)
+  }
+  return data
+}
+
+export async function deleteNovelCoverFile(coverUrl) {
+  const token = getLegacyToken()
+  if (!token) throw new Error('需要 Legacy 管理员权限，请重新登录')
+
+  const response = await fetch(`${API_BASE}/api/admin-legacy/novels/cover-upload`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ coverUrl }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data?.error || `删除失败(${response.status})`)
+  }
+  return data
+}
+
 export async function fetchAdminNovelTitles() {
   const data = await requestJson('/api/admin-legacy/novel-titles')
   return Array.isArray(data?.items) ? data.items : []

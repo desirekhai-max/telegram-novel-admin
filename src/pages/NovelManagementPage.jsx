@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getLegacyToken } from '../lib/adminAuth.js'
+import NovelCoverUpload from '../components/NovelCoverUpload.jsx'
 import {
   createAdminNovel,
   deleteAdminNovel,
@@ -347,13 +348,13 @@ export default function NovelManagementPage() {
           <div className="admin-modal-card admin-modal-card--wide">
             <p className="admin-modal-title">{editorMode === 'create' ? '新增小说' : '编辑小说'}</p>
             <div className="admin-novel-form-grid">
-              <label>
-                封面图 URL
-                <input
-                  value={form.coverUrl}
-                  onChange={(e) => setForm((p) => ({ ...p, coverUrl: e.target.value }))}
+              <div className="admin-novel-form-cover">
+                <NovelCoverUpload
+                  coverUrl={form.coverUrl}
+                  disabled={saving}
+                  onChange={(coverUrl) => setForm((p) => ({ ...p, coverUrl }))}
                 />
-              </label>
+              </div>
               <label>
                 标题 *
                 <input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} />

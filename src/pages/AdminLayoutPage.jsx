@@ -13,12 +13,12 @@ import { formatCambodiaNowText } from '../lib/cambodiaTime.js'
 
 const MENUS = [
   { to: '/admin/dashboard', label: '控制台' },
+  { to: '/admin/finance', label: '小说管理' },
+  { to: '/admin/stats', label: '章节管理' },
   { to: '/admin/lists', label: '阅读记录' },
   { to: '/admin/orders', label: '订单管理' },
-  { to: '/admin/account', label: '账户资料' },
-  { to: '/admin/finance', label: '财务' },
-  { to: '/admin/stats', label: '数据统计' },
   { to: '/admin/reports', label: '举报管理' },
+  { to: '/admin/account', label: '账户资料' },
   { to: '/admin/settings', label: '设置' },
 ]
 

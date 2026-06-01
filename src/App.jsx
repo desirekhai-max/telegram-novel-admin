@@ -36,9 +36,15 @@ export default function App() {
         <Route path="lists" element={<ReadingListsPage />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="users" element={<UserManagementPage />} />
-        <Route path="finance" element={<PlaceholderPage title="财务" />} />
+        <Route
+          path="finance"
+          element={<PlaceholderPage title="小说管理" message="小说管理功能开发中..." />}
+        />
         <Route path="account" element={<AccountProfilePage />} />
-        <Route path="stats" element={<PlaceholderPage title="数据统计" />} />
+        <Route
+          path="stats"
+          element={<PlaceholderPage title="章节管理" message="章节管理功能开发中..." />}
+        />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<PlaceholderPage title="设置" />} />
       </Route>

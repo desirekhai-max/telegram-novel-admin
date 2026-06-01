@@ -1,5 +1,17 @@
 * { box-sizing: border-box; }
-body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6ff; }
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  font-family: "Microsoft YaHei", sans-serif;
+  background: #f2f6ff;
+}
 
 .admin-login-page {
   min-height: 100vh;
@@ -134,12 +146,17 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
 
 .admin-shell {
   min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 240px minmax(0, 1fr);
   background: #eef3ff;
 }
 
 .admin-sidebar {
+  width: 240px;
+  flex-shrink: 0;
   background: #143070;
   color: #fff;
   padding: 18px 12px;
@@ -183,7 +200,13 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
   font-weight: 700;
 }
 
-.admin-main { padding: 16px; }
+.admin-main {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  padding: 16px;
+}
 
 .admin-shell-top {
   max-width: none;
@@ -463,6 +486,80 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
   margin-left: auto;
 }
 
+.admin-reading-filter-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.admin-reading-filter-fields {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-reading-filter-bar label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #4d5d82;
+  flex-shrink: 0;
+}
+
+.admin-reading-field input {
+  box-sizing: border-box;
+  height: 36px;
+  border: 1px solid #c9d6f3;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #173877;
+  background: #fff;
+}
+
+.admin-reading-field--member-name input,
+.admin-reading-field--member-id input,
+.admin-reading-field--member-account input {
+  width: 180px;
+}
+
+.admin-reading-field--shelf-title input {
+  width: 220px;
+}
+
+.admin-reading-field--start-datetime input,
+.admin-reading-field--end-datetime input {
+  flex: 0 0 180px;
+  width: 180px;
+  max-width: 180px;
+  min-width: 180px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.admin-reading-filter-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+}
+
 .admin-reports-action-btn {
   box-sizing: border-box;
   height: 36px;
@@ -474,6 +571,10 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
 }
 
 .admin-panel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
   background: #fff;
   border-radius: 14px;
   padding: 16px;
@@ -773,9 +874,13 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
 .admin-stat-card h3 { margin: 6px 0 0; font-size: 30px; color: #173877; }
 
 .admin-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid #e0e8fb;
   border-radius: 10px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: visible;
   background: #fff;
 }
 
@@ -942,6 +1047,9 @@ body { margin: 0; font-family: "Microsoft YaHei", sans-serif; background: #f2f6f
 }
 
 .admin-pagination-row {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin-top: 10px;
   display: flex;
   justify-content: flex-end;

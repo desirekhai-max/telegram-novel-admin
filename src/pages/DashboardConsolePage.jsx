@@ -1,6 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchPresenceStats } from '../lib/adminApi.js'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  fetchAllVipOrdersFromMemberIps,
+  fetchMemberIps,
+  fetchPresenceStats,
+  fetchReadingRecords,
+} from '../lib/adminApi.js'
+import { getLegacyToken } from '../lib/adminAuth.js'
+import {
+  buildDashboardCards,
+  computeDashboardStats,
+  getCurrentMonthPresenceRange,
+} from '../lib/dashboardStats.js'
 import { getSettlementDateString } from '../lib/cambodiaTime.js'
+
+const AUTO_REFRESH_MS = 10 * 1000
 
 function toDisplayDate(apiDate) {
   const [year, month, day] = String(apiDate || '').split('-')
@@ -17,16 +30,6 @@ function toApiDate(displayDate) {
 
 const DEFAULT_FROM = getSettlementDateString(0)
 const DEFAULT_TO = getSettlementDateString(1)
-
-function normalizeCards(counts = {}) {
-  return [
-    { label: '注册用户', value: counts.registeredTotal ?? 0 },
-    { label: 'VIP 用户', value: counts.paidTotal ?? 0 },
-    { label: '今日活跃', value: counts.readToday ?? 0 },
-    { label: '阅读总数', value: counts.readTotal ?? 0 },
-    { label: '订单总数', value: counts.orderTotal ?? 0 },
-  ]
-}
 
 function shouldShowError(message) {
   const text = String(message || '').trim().toLowerCase()
@@ -56,7 +59,7 @@ export default function DashboardConsolePage() {
   const [flashVersion, setFlashVersion] = useState(0)
   const [linkRefreshFlash, setLinkRefreshFlash] = useState(false)
   const [error, setError] = useState('')
-  const [stats, setStats] = useState({})
+  const [dashboardStats, setDashboardStats] = useState({})
   const [activeMembers, setActiveMembers] = useState({
     total: 0,
     android: 0,
@@ -65,54 +68,91 @@ export default function DashboardConsolePage() {
     author: 0,
   })
 
-  const isTodayRange = useMemo(() => {
-    return appliedFrom === getSettlementDateString(0) && appliedTo === getSettlementDateString(1)
-  }, [appliedFrom, appliedTo])
+  const cards = useMemo(() => buildDashboardCards(dashboardStats), [dashboardStats])
 
-  const cards = useMemo(() => normalizeCards(stats), [stats])
+  const loadStats = useCallback(
+    async ({ showFlash = true } = {}) => {
+      if (showFlash) {
+        setFlashVersion((v) => v + 1)
+        setLinkRefreshFlash(true)
+        window.setTimeout(() => setLinkRefreshFlash(false), 140)
+      }
+
+      setError('')
+
+      const legacyToken = getLegacyToken()
+      const monthRange = getCurrentMonthPresenceRange()
+
+      let presenceCounts = {}
+      let monthPresenceCounts = {}
+      let onlinePresenceCounts = {}
+      let readingRecords = []
+      let orders = []
+      let memberIps = []
+
+      try {
+        ;[presenceCounts, monthPresenceCounts, onlinePresenceCounts] = await Promise.all([
+          fetchPresenceStats({}),
+          fetchPresenceStats({ from: monthRange.start, to: monthRange.end }),
+          fetchPresenceStats({ from: appliedFrom, to: appliedTo }),
+        ])
+      } catch (err) {
+        setError(err?.message || '统计加载失败')
+        return
+      }
+
+      if (legacyToken) {
+        try {
+          memberIps = await fetchMemberIps({ token: legacyToken })
+          ;[readingRecords, orders] = await Promise.all([
+            fetchReadingRecords({ token: legacyToken }),
+            fetchAllVipOrdersFromMemberIps({ token: legacyToken, memberIps }),
+          ])
+          console.log('Dashboard member-ips', memberIps.length, 'vip orders', orders.length)
+        } catch (err) {
+          console.warn('Dashboard legacy fetch failed', err?.message || err)
+        }
+      }
+
+      const stats = computeDashboardStats({
+        presenceCounts,
+        monthPresenceCounts,
+        readingRecords: Array.isArray(readingRecords) ? readingRecords : [],
+        orders: Array.isArray(orders) ? orders : [],
+        memberIps: Array.isArray(memberIps) ? memberIps : [],
+      })
+
+      console.log('ORDERS COUNT', stats.debug.ordersCount)
+      console.log('VIP USERS', stats.debug.vipUsersCount)
+      console.log('MONTH ORDERS', stats.debug.monthOrdersCount)
+      console.log('TOTAL REVENUE', stats.debug.totalRevenue)
+      console.log('Dashboard stats sources', stats.debug)
+
+      setActiveMembers(normalizeActiveMembers(onlinePresenceCounts || {}))
+      setDashboardStats(stats)
+    },
+    [appliedFrom, appliedTo],
+  )
 
   useEffect(() => {
     let stop = false
-    const fetchData = async () => {
-      setFlashVersion((v) => v + 1)
-      setLinkRefreshFlash(true)
-      window.setTimeout(() => setLinkRefreshFlash(false), 140)
-      setError('')
-      try {
-        const counts = await fetchPresenceStats({ from: appliedFrom, to: appliedTo })
-        if (!stop) {
-          setStats(counts || {})
-          setActiveMembers(normalizeActiveMembers(counts || {}))
-        }
-      } catch (err) {
-        if (!stop) setError(err?.message || '统计加载失败')
-      }
+
+    const run = async () => {
+      if (stop) return
+      await loadStats({ showFlash: true })
     }
 
-    fetchData()
-    let timerId
-    if (isTodayRange) {
-      timerId = window.setInterval(fetchData, 30 * 1000)
-    } else {
-      timerId = window.setTimeout(() => {
-        if (stop) return
-        const todayFrom = getSettlementDateString(0)
-        const todayTo = getSettlementDateString(1)
-        setAppliedFrom(todayFrom)
-        setAppliedTo(todayTo)
-        setInputFrom(toDisplayDate(todayFrom))
-        setInputTo(toDisplayDate(todayTo))
-      }, 30 * 1000)
-    }
+    run()
+    const timerId = window.setInterval(() => {
+      if (stop) return
+      loadStats({ showFlash: false })
+    }, AUTO_REFRESH_MS)
+
     return () => {
       stop = true
-      if (isTodayRange) {
-        window.clearInterval(timerId)
-      } else {
-        window.clearTimeout(timerId)
-      }
+      window.clearInterval(timerId)
     }
-  }, [appliedFrom, appliedTo, isTodayRange, queryVersion])
+  }, [loadStats, queryVersion])
 
   const onQuery = () => {
     const apiFrom = toApiDate(inputFrom)
@@ -124,6 +164,7 @@ export default function DashboardConsolePage() {
     setAppliedFrom(apiFrom)
     setAppliedTo(apiTo)
     setQueryVersion((v) => v + 1)
+    loadStats({ showFlash: true })
   }
 
   return (
@@ -138,7 +179,7 @@ export default function DashboardConsolePage() {
         }}
       >
         {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
-        <div className="admin-grid-cards">
+        <div className="admin-grid-cards admin-dashboard-grid">
           {cards.map((card) => (
             <article className="admin-stat-card" key={card.label}>
               <p>{card.label}</p>

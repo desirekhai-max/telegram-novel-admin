@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchReadingRecords } from '../lib/adminApi.js'
 import { getLegacyToken } from '../lib/adminAuth.js'
 import { getSettlementDateString } from '../lib/cambodiaTime.js'
 
 const PAGE_SIZE = 50
+const AUTO_REFRESH_MS = 10 * 1000
 const DEFAULT_FROM = `${getSettlementDateString(0)} 09:00:00`
 const DEFAULT_TO = `${getSettlementDateString(1)} 09:00:00`
 
 function createDefaultInputFilters() {
   return {
     memberName: '',
+    memberId: '',
     memberAccount: '',
     novelTitle: '',
     from: DEFAULT_FROM,
@@ -19,6 +21,7 @@ function createDefaultInputFilters() {
 
 const EMPTY_APPLIED_FILTERS = {
   memberName: '',
+  memberId: '',
   memberAccount: '',
   novelTitle: '',
   from: '',
@@ -58,6 +61,7 @@ function filterRows(rows, filters) {
 
   return rows.filter((row) => {
     if (!includesText(row.memberName, filters.memberName)) return false
+    if (!includesText(row.memberId, filters.memberId)) return false
     if (!includesText(row.memberAccount || row.username || row.account, filters.memberAccount)) return false
     if (!includesText(row.shelfTitle, filters.novelTitle)) return false
 
@@ -100,30 +104,38 @@ export default function ReadingListsPage() {
   const [records, setRecords] = useState([])
   const [page, setPage] = useState(1)
   const [pageInput, setPageInput] = useState('1')
+  const stopRef = useRef(false)
+
+  const loadRecords = useCallback(async ({ showLoading = true } = {}) => {
+    if (!hasLegacyToken) return
+
+    if (showLoading) setLoading(true)
+    setError('')
+    try {
+      const rows = await fetchReadingRecords({ token: getLegacyToken() })
+      if (!stopRef.current) setRecords(rows)
+    } catch (err) {
+      if (!stopRef.current) setError(err?.message || '读取阅读记录失败')
+    } finally {
+      if (!stopRef.current && showLoading) setLoading(false)
+    }
+  }, [hasLegacyToken])
 
   useEffect(() => {
     if (!hasLegacyToken) return undefined
 
-    let stop = false
-    const load = async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const rows = await fetchReadingRecords({ token: getLegacyToken() })
-        if (!stop) setRecords(rows)
-      } catch (err) {
-        if (!stop) setError(err?.message || '读取阅读记录失败')
-      } finally {
-        if (!stop) setLoading(false)
-      }
-    }
-    load()
-    const timer = window.setInterval(load, 15 * 1000)
+    stopRef.current = false
+    loadRecords()
+
+    const timer = window.setInterval(() => {
+      loadRecords({ showLoading: false })
+    }, AUTO_REFRESH_MS)
+
     return () => {
-      stop = true
+      stopRef.current = true
       window.clearInterval(timer)
     }
-  }, [hasLegacyToken])
+  }, [hasLegacyToken, loadRecords])
 
   const sortedRows = useMemo(() => {
     return [...records].sort((a, b) => {
@@ -162,6 +174,7 @@ export default function ReadingListsPage() {
     setLinkRefreshFlash(true)
     window.setTimeout(() => setLinkRefreshFlash(false), 140)
     setAppliedFilters({ ...inputFilters })
+    loadRecords()
   }
 
   const onReset = () => {
@@ -189,43 +202,52 @@ export default function ReadingListsPage() {
       {linkRefreshFlash ? <div className="admin-link-refresh-flash" /> : null}
       {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
 
-      <div className="admin-reports-filter-bar">
-        <label className="admin-reports-field admin-reports-field--title">
-          会员名称
-          <input
-            value={inputFilters.memberName}
-            onChange={(e) => setInputFilters((prev) => ({ ...prev, memberName: e.target.value }))}
-          />
-        </label>
-        <label className="admin-reports-field admin-reports-field--user">
-          会员账号
-          <input
-            value={inputFilters.memberAccount}
-            onChange={(e) => setInputFilters((prev) => ({ ...prev, memberAccount: e.target.value }))}
-          />
-        </label>
-        <label className="admin-reports-field admin-reports-field--title">
-          小说标题
-          <input
-            value={inputFilters.novelTitle}
-            onChange={(e) => setInputFilters((prev) => ({ ...prev, novelTitle: e.target.value }))}
-          />
-        </label>
-        <label className="admin-reports-field admin-reports-field--datetime">
-          开始日期时间
-          <input
-            value={inputFilters.from}
-            onChange={(e) => setInputFilters((prev) => ({ ...prev, from: e.target.value }))}
-          />
-        </label>
-        <label className="admin-reports-field admin-reports-field--datetime">
-          结束日期时间
-          <input
-            value={inputFilters.to}
-            onChange={(e) => setInputFilters((prev) => ({ ...prev, to: e.target.value }))}
-          />
-        </label>
-        <div className="admin-reports-filter-actions">
+      <div className="admin-reading-filter-bar">
+        <div className="admin-reading-filter-fields">
+          <label className="admin-reading-field admin-reading-field--member-name">
+            会员名称
+            <input
+              value={inputFilters.memberName}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, memberName: e.target.value }))}
+            />
+          </label>
+          <label className="admin-reading-field admin-reading-field--member-id">
+            会员ID
+            <input
+              value={inputFilters.memberId}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, memberId: e.target.value }))}
+            />
+          </label>
+          <label className="admin-reading-field admin-reading-field--member-account">
+            会员账号
+            <input
+              value={inputFilters.memberAccount}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, memberAccount: e.target.value }))}
+            />
+          </label>
+          <label className="admin-reading-field admin-reading-field--shelf-title">
+            小说标题
+            <input
+              value={inputFilters.novelTitle}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, novelTitle: e.target.value }))}
+            />
+          </label>
+          <label className="admin-reading-field admin-reading-field--start-datetime">
+            开始日期时间
+            <input
+              value={inputFilters.from}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, from: e.target.value }))}
+            />
+          </label>
+          <label className="admin-reading-field admin-reading-field--end-datetime">
+            结束日期时间
+            <input
+              value={inputFilters.to}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, to: e.target.value }))}
+            />
+          </label>
+        </div>
+        <div className="admin-reading-filter-actions">
           <button className="admin-btn admin-btn-primary admin-reports-action-btn" type="button" onClick={onQuery}>
             查询
           </button>

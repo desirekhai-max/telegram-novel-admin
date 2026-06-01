@@ -1,6 +1,6 @@
 const CAMBODIA_TZ = 'Asia/Phnom_Penh'
 
-function getCambodiaParts(date = new Date()) {
+export function getCambodiaParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: CAMBODIA_TZ,
     year: 'numeric',

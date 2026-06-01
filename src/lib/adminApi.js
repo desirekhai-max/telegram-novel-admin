@@ -68,11 +68,95 @@ export async function fetchReadingRecords({ token }) {
   return extractItems(data)
 }
 
-export async function fetchOrders({ token, from, to }) {
+export async function fetchMemberIps({ token }) {
+  const data = await requestJson('/api/admin-legacy/member-ips', { token })
+  return extractItems(data)
+}
+
+export async function fetchVipOrdersForTelegramUser(telegramUserId) {
+  const id = String(telegramUserId || '').trim()
+  if (!id) return []
+
+  const data = await requestJson('/api/vip-orders/list', {
+    method: 'POST',
+    body: {
+      telegramUser: {
+        id: Number(id) || id,
+        telegramUserId: id,
+      },
+    },
+  })
+  return extractItems(data)
+}
+
+/** 从 member-ips 的 tg_* 用户聚合 vipOrdersByUser（POST /api/vip-orders/list） */
+export async function fetchAllVipOrdersFromMemberIps({ token, memberIps: memberIpsInput }) {
+  const memberIps = Array.isArray(memberIpsInput) ? memberIpsInput : await fetchMemberIps({ token })
+  const tgIds = []
+  const seen = new Set()
+
+  memberIps.forEach((row) => {
+    const matched = String(row?.memberId || '').trim().match(/^tg_(\d+)$/i)
+    if (!matched || seen.has(matched[1])) return
+    seen.add(matched[1])
+    tgIds.push(matched[1])
+  })
+
+  const batches = await Promise.all(
+    tgIds.map(async (telegramUserId) => {
+      try {
+        const items = await fetchVipOrdersForTelegramUser(telegramUserId)
+        return items.map((order) => ({
+          ...order,
+          telegramUserId,
+          memberId: `tg_${telegramUserId}`,
+        }))
+      } catch (err) {
+        console.warn('Dashboard vip orders fetch failed', telegramUserId, err?.message || err)
+        return []
+      }
+    }),
+  )
+
+  return batches.flat()
+}
+
+export async function fetchOrders({ token, from, to } = {}) {
   return requestJson('/api/orders', {
     token,
     query: { from, to },
   })
+}
+
+export async function fetchDashboardOrders({ token }) {
+  if (!token) return []
+
+  const attempts = [
+    { label: '/api/orders?from=2000-01-01&to=2099-12-31', run: () => fetchOrders({ token, from: '2000-01-01', to: '2099-12-31' }) },
+    { label: '/api/orders', run: () => fetchOrders({ token }) },
+    { label: '/api/admin/orders', run: () => requestJson('/api/admin/orders', { token }) },
+  ]
+
+  for (const attempt of attempts) {
+    try {
+      const data = await attempt.run()
+      const orders = extractOrders(data)
+      console.log('Dashboard orders fetch', attempt.label, orders.length)
+      if (orders.length) return orders
+    } catch (err) {
+      console.warn('Dashboard orders fetch failed', attempt.label, err?.message || err)
+    }
+  }
+
+  return []
+}
+
+function extractOrders(data) {
+  if (Array.isArray(data?.orders)) return data.orders
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.records)) return data.records
+  if (Array.isArray(data)) return data
+  return []
 }
 
 export async function fetchUsers({ token }) {

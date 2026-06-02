@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { hasLegacyToken } from '../lib/adminAuth.js'
 import LegacyRequiredNotice from '../components/LegacyRequiredNotice.jsx'
 import NovelCoverUpload from '../components/NovelCoverUpload.jsx'
+import { fetchAdminAppFilters } from '../lib/appFiltersAdminApi.js'
 import {
   createAdminNovel,
   deleteAdminNovel,
@@ -18,7 +19,7 @@ const EMPTY_FORM = {
   title: '',
   author: '',
   genreId: '',
-  tags: '',
+  tags: [],
   synopsis: '',
   status: 'ongoing',
   source: 'original',
@@ -45,6 +46,14 @@ function tagsToText(tags) {
   return String(tags || '')
 }
 
+function tagsToArray(tags) {
+  if (Array.isArray(tags)) return tags.map((t) => String(t).trim()).filter(Boolean)
+  return String(tags || '')
+    .split(/[,，、]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+}
+
 export default function NovelManagementPage() {
   const hasLegacy = hasLegacyToken()
   const [inputFilters, setInputFilters] = useState(EMPTY_FILTERS)
@@ -61,6 +70,9 @@ export default function NovelManagementPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [genreOptions, setGenreOptions] = useState([])
+  const [tagOptions, setTagOptions] = useState([])
+  const [tagsSearch, setTagsSearch] = useState('')
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -89,10 +101,36 @@ export default function NovelManagementPage() {
     loadList()
   }, [loadList])
 
+  useEffect(() => {
+    if (!hasLegacy) return
+    let cancelled = false
+    void fetchAdminAppFilters()
+      .then((data) => {
+        if (cancelled) return
+        const genres = Array.isArray(data?.genres?.items)
+          ? data.genres.items.filter((it) => it.enabled !== false)
+          : []
+        const tags = Array.isArray(data?.tags?.items)
+          ? data.tags.items.filter((it) => it.enabled !== false)
+          : []
+        setGenreOptions(genres)
+        setTagOptions(tags)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setGenreOptions([])
+        setTagOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [hasLegacy])
+
   const openCreate = () => {
     setEditorMode('create')
     setEditingId('')
     setForm(EMPTY_FORM)
+    setTagsSearch('')
     setEditorOpen(true)
   }
 
@@ -108,13 +146,14 @@ export default function NovelManagementPage() {
         title: novel.title || '',
         author: novel.author || '',
         genreId: novel.genreId || '',
-        tags: tagsToText(novel.tags),
+        tags: tagsToArray(novel.tags),
         synopsis: novel.synopsis || '',
         status: novel.status || 'ongoing',
         source: novel.source || 'original',
         firstChapterTitle: '',
         firstChapterContent: '',
       })
+      setTagsSearch('')
       setEditorOpen(true)
     } catch (err) {
       setError(err?.message || '加载小说详情失败')
@@ -171,6 +210,20 @@ export default function NovelManagementPage() {
   }
 
   const pagedHint = useMemo(() => `共 ${total} 条`, [total])
+  const filteredTagOptions = useMemo(() => {
+    const kw = tagsSearch.trim().toLowerCase()
+    if (!kw) return tagOptions
+    return tagOptions.filter((it) => String(it.label || it.id).toLowerCase().includes(kw))
+  }, [tagOptions, tagsSearch])
+
+  const toggleTag = (id) => {
+    setForm((prev) => {
+      const current = new Set(tagsToArray(prev.tags))
+      if (current.has(id)) current.delete(id)
+      else current.add(id)
+      return { ...prev, tags: [...current] }
+    })
+  }
 
   if (!hasLegacy) {
     return <LegacyRequiredNotice />
@@ -360,14 +413,64 @@ export default function NovelManagementPage() {
               </label>
               <label>
                 题材
-                <input
+                <select
                   value={form.genreId}
                   onChange={(e) => setForm((p) => ({ ...p, genreId: e.target.value }))}
-                />
+                >
+                  {genreOptions.length ? (
+                    <>
+                      <option value="">请选择题材</option>
+                      {genreOptions.map((it) => (
+                        <option key={it.id} value={it.id}>
+                          {it.label}
+                        </option>
+                      ))}
+                    </>
+                  ) : (
+                    <option value="">暂无可选题材</option>
+                  )}
+                </select>
               </label>
-              <label>
-                标签（逗号分隔）
-                <input value={form.tags} onChange={(e) => setForm((p) => ({ ...p, tags: e.target.value }))} />
+              <label className="admin-novel-form-span2">
+                标签（多选）
+                {tagOptions.length ? (
+                  <>
+                    <input
+                      placeholder="搜索标签"
+                      value={tagsSearch}
+                      onChange={(e) => setTagsSearch(e.target.value)}
+                    />
+                    <div className="admin-novel-tag-picker">
+                      {filteredTagOptions.length ? (
+                        filteredTagOptions.map((it) => {
+                          const selected = tagsToArray(form.tags).includes(it.id)
+                          return (
+                            <button
+                              key={it.id}
+                              type="button"
+                              className={[
+                                'admin-novel-tag-chip',
+                                selected ? 'admin-novel-tag-chip--active' : '',
+                              ].join(' ')}
+                              onClick={() => toggleTag(it.id)}
+                            >
+                              {it.label}
+                            </button>
+                          )
+                        })
+                      ) : (
+                        <span className="admin-novel-tag-empty">未匹配到标签</span>
+                      )}
+                    </div>
+                    <div className="admin-novel-tag-selected">
+                      {tagsToArray(form.tags).length
+                        ? `已选：${tagsToArray(form.tags).join('、')}`
+                        : '已选：无'}
+                    </div>
+                  </>
+                ) : (
+                  <p className="admin-novel-option-empty">暂无可选标签</p>
+                )}
               </label>
               <label>
                 连载状态

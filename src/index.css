@@ -341,6 +341,30 @@ body {
   padding: 16px;
 }
 
+.admin-modal-card--scrollable {
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.admin-modal-sticky-head {
+  flex-shrink: 0;
+  padding: 16px 16px 10px;
+  border-bottom: 1px solid #eef2fb;
+  background: #fff;
+}
+
+.admin-modal-scroll-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 16px 8px;
+}
+
 .admin-modal-title {
   margin: 0;
   color: #173877;
@@ -359,6 +383,14 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.admin-modal-actions--sticky {
+  flex-shrink: 0;
+  margin-top: 0;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #eef2fb;
+  background: #fff;
 }
 
 .admin-modal-btn-cancel {

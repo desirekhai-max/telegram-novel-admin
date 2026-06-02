@@ -126,6 +126,15 @@ export default function NovelManagementPage() {
     }
   }, [hasLegacy])
 
+  useEffect(() => {
+    if (!editorOpen) return undefined
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [editorOpen])
+
   const openCreate = () => {
     setEditorMode('create')
     setEditingId('')
@@ -393,9 +402,12 @@ export default function NovelManagementPage() {
 
       {editorOpen ? (
         <div className="admin-modal-backdrop" role="dialog" aria-modal="true">
-          <div className="admin-modal-card admin-modal-card--wide">
-            <p className="admin-modal-title">{editorMode === 'create' ? '新增小说' : '编辑小说'}</p>
-            <div className="admin-novel-form-grid">
+          <div className="admin-modal-card admin-modal-card--wide admin-modal-card--scrollable">
+            <div className="admin-modal-sticky-head">
+              <p className="admin-modal-title">{editorMode === 'create' ? '新增小说' : '编辑小说'}</p>
+            </div>
+            <div className="admin-modal-scroll-body">
+              <div className="admin-novel-form-grid">
               <div className="admin-novel-form-cover">
                 <NovelCoverUpload
                   coverUrl={form.coverUrl}
@@ -519,8 +531,9 @@ export default function NovelManagementPage() {
                   </label>
                 </>
               ) : null}
+              </div>
             </div>
-            <div className="admin-modal-actions">
+            <div className="admin-modal-actions admin-modal-actions--sticky">
               <button className="admin-btn admin-modal-btn-cancel" type="button" onClick={() => setEditorOpen(false)}>
                 取消
               </button>

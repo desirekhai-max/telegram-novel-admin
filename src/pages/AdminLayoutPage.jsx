@@ -19,6 +19,7 @@ const MENUS = [
   { to: '/admin/orders', label: '订单管理' },
   { to: '/admin/reports', label: '举报管理' },
   { to: '/admin/account', label: '账户资料' },
+  { to: '/admin/app-filters', label: '首页筛选管理' },
   { to: '/admin/settings', label: '设置' },
 ]
 

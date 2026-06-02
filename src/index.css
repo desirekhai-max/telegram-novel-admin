@@ -1179,6 +1179,62 @@ body {
   grid-column: 1 / -1;
 }
 
+.admin-panel-kicker {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: #6b7fd7;
+  font-weight: 600;
+}
+
+.admin-panel-heading {
+  margin: 0 0 8px;
+  font-size: 20px;
+  color: #1a2a4a;
+}
+
+.admin-panel-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #5a6b8a;
+  line-height: 1.5;
+}
+
+.admin-success {
+  color: #2e7d32;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.admin-tabs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.admin-filter-editor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.admin-filter-editor-bar label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #4d5d82;
+}
+
+.admin-filter-editor-bar input[type='text'],
+.admin-filter-editor-bar input:not([type='checkbox']) {
+  min-width: 120px;
+  border: 1px solid #c9d6f3;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
 .admin-novel-form-cover {
   grid-column: 1 / -1;
 }

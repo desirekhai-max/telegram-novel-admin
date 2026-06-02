@@ -10,6 +10,7 @@ import PlaceholderPage from './pages/PlaceholderPage.jsx'
 import NovelManagementPage from './pages/NovelManagementPage.jsx'
 import ChapterManagementPage from './pages/ChapterManagementPage.jsx'
 import ReportsPage from './pages/ReportsPage.jsx'
+import HomeFiltersAdminPage from './pages/HomeFiltersAdminPage.jsx'
 import { getToken } from './lib/adminAuth.js'
 
 function ProtectedRoute({ children }) {
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="account" element={<AccountProfilePage />} />
         <Route path="stats" element={<ChapterManagementPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="app-filters" element={<HomeFiltersAdminPage />} />
         <Route path="settings" element={<PlaceholderPage title="设置" />} />
       </Route>
       <Route path="/dashboard" element={<Navigate to="/admin/dashboard" replace />} />

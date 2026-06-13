@@ -1,4 +1,6 @@
-const API_BASE = 'https://telegram-novel-app-production-7f1e.up.railway.app'
+const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  'https://telegram-novel-app-production-7f1e.up.railway.app'
 const TOKEN_KEY = 'admin_token'
 const LEGACY_TOKEN_KEY = 'admin_legacy_token'
 const USERNAME_KEY = 'admin_username'
@@ -81,11 +83,16 @@ export async function loginAdmin({ username, password, otp }) {
     otp: String(otp || '').trim(),
   }
 
-  const adminResponse = await fetch(`${API_BASE}/api/admin/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentials),
-  })
+  let adminResponse
+  try {
+    adminResponse = await fetch(`${API_BASE}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    })
+  } catch {
+    throw new Error('无法连接后端服务，请检查网络或确认 API 服务已启动')
+  }
 
   const data = await parseJsonSafe(adminResponse)
   if (!adminResponse.ok || !data?.token) {

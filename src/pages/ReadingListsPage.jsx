@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchReadingRecords } from '../lib/adminApi.js'
 import { getLegacyToken } from '../lib/adminAuth.js'
-import { getSettlementDateString } from '../lib/cambodiaTime.js'
 
 const PAGE_SIZE = 50
 const AUTO_REFRESH_MS = 10 * 1000
-const DEFAULT_FROM = `${getSettlementDateString(0)} 09:00:00`
-const DEFAULT_TO = `${getSettlementDateString(1)} 09:00:00`
 
 function createDefaultInputFilters() {
   return {
@@ -14,8 +11,8 @@ function createDefaultInputFilters() {
     memberId: '',
     memberAccount: '',
     novelTitle: '',
-    from: DEFAULT_FROM,
-    to: DEFAULT_TO,
+    from: '',
+    to: '',
   }
 }
 

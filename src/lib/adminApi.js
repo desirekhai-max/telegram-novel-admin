@@ -1,4 +1,6 @@
-const API_BASE = 'https://telegram-novel-app-production-7f1e.up.railway.app'
+const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  'https://telegram-novel-app-production-7f1e.up.railway.app'
 
 function buildQuery(params = {}) {
   const query = new URLSearchParams()
@@ -121,11 +123,45 @@ export async function fetchAllVipOrdersFromMemberIps({ token, memberIps: memberI
   return batches.flat()
 }
 
-export async function fetchOrders({ token, from, to } = {}) {
-  return requestJson('/api/orders', {
+export async function fetchAdminOrders({
+  token,
+  status = '',
+  paymentMethod = '',
+  dateFrom = '',
+  dateTo = '',
+  keyword = '',
+  page = 1,
+  pageSize = 50,
+} = {}) {
+  return requestJson('/api/admin/orders', {
     token,
-    query: { from, to },
+    query: {
+      status,
+      payment_method: paymentMethod,
+      date_from: dateFrom,
+      date_to: dateTo,
+      keyword,
+      page,
+      pageSize,
+    },
   })
+}
+
+export async function searchAdminOrders({ token, filters = {} } = {}) {
+  return requestJson('/api/admin/orders/search', {
+    token,
+    method: 'POST',
+    body: filters,
+  })
+}
+
+export async function fetchAdminOrderById({ token, id }) {
+  return requestJson(`/api/admin/orders/${encodeURIComponent(String(id))}`, { token })
+}
+
+/** @deprecated Use fetchAdminOrders or searchAdminOrders */
+export async function fetchOrders({ token, from, to } = {}) {
+  return fetchAdminOrders({ token, dateFrom: from, dateTo: to })
 }
 
 export async function fetchDashboardOrders({ token }) {

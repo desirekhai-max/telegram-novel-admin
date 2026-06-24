@@ -1,46 +1,61 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchUsers, updateUserFlags } from '../lib/adminApi.js'
-import { getToken } from '../lib/adminAuth.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { resolveApiAssetUrl } from '../lib/apiBase.js'
+import {
+  fetchAdminUsers,
+  getApiOriginLabel,
+  normalizeAdminUserRow,
+  patchAdminUserFlags,
+} from '../lib/usersApi.js'
 
+const PAGE_SIZE = 50
+const AUTO_REFRESH_MS = 30 * 1000
 const TYPE_LABEL = {
   normal: '普通',
   vip: 'VIP',
   author: '作者',
 }
 
-function normalizeUserType(value) {
-  const text = String(value || '').trim().toLowerCase()
-  if (text === 'vip') return 'vip'
-  if (text === 'author') return 'author'
-  return 'normal'
+const EMPTY_FILTERS = {
+  nickname: '',
+  tgId: '',
+  username: '',
+  userType: '',
+  vipOnly: '',
 }
 
-function normalizeTaskHistory(row = {}) {
-  return {
-    shareAt: row.shareTaskAt || row.shareCompletedAt || row.taskShareAt || '-',
-    groupAt: row.groupTaskAt || row.groupCompletedAt || row.taskGroupAt || '-',
-    freeMinutes:
-      row.freeMinutes ?? row.totalFreeMinutes ?? row.rewardMinutes ?? row.taskRewardMinutes ?? 0,
+function createDefaultInputFilters() {
+  return { ...EMPTY_FILTERS }
+}
+
+function formatCount(value) {
+  const num = Number(value) || 0
+  if (num >= 10000) return `${(num / 10000).toFixed(1)}万`
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
+  return String(num)
+}
+
+function formatSpend(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return '—'
+  return `$${num.toFixed(2)}`
+}
+
+function formatUsername(value) {
+  const text = String(value || '').trim()
+  if (!text) return '—'
+  return text.startsWith('@') ? text : `@${text}`
+}
+
+function buildAccountProfileLink(row, from) {
+  const params = new URLSearchParams({ tgId: row.tgId, from })
+  if (from === 'name' && row.nickname && row.nickname !== '—') {
+    params.set('nickname', row.nickname)
   }
-}
-
-function normalizeUsers(data) {
-  const list = Array.isArray(data?.users) ? data.users : Array.isArray(data) ? data : []
-  return list.map((row) => {
-    const tgId = String(row.tgId || row.telegramId || row.userId || row.id || '')
-    return {
-      id: tgId || String(row.id || Math.random()),
-      tgId: tgId || '-',
-      avatar: row.avatar || row.avatarUrl || row.photoUrl || '',
-      firstName: row.firstName || row.name || row.displayName || '-',
-      username: row.username || row.tgUsername || row.account || '-',
-      ipLocation: row.ipLocation || row.location || row.ipCity || row.loginLocation || '-',
-      userType: normalizeUserType(row.userType || row.role || row.level),
-      isBanned: Boolean(row.isBanned || row.banned || row.ban),
-      whitelist: Boolean(row.whitelist || row.allowBypassTask || row.skipTask),
-      tasks: normalizeTaskHistory(row),
-    }
-  })
+  if (from === 'username' && row.username) {
+    params.set('username', row.username.replace(/^@/, ''))
+  }
+  return `/admin/account?${params.toString()}`
 }
 
 function shouldShowError(message) {
@@ -48,174 +63,370 @@ function shouldShowError(message) {
   return text && text !== 'not found'
 }
 
-export default function UserManagementPage() {
+export default function UserManagementPage() {  const [inputFilters, setInputFilters] = useState(createDefaultInputFilters)
+  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [submittingId, setSubmittingId] = useState('')
   const [error, setError] = useState('')
   const [rows, setRows] = useState([])
-  const [filters, setFilters] = useState({
-    memberName: '',
-    memberId: '',
-    memberAccount: '',
-    userType: '',
-  })
+  const [page, setPage] = useState(1)
+  const [lastFetchedAt, setLastFetchedAt] = useState(0)
+  const stopRef = useRef(false)
 
-  useEffect(() => {
-    let stop = false
-    const load = async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const data = await fetchUsers({ token: getToken() })
-        if (!stop) setRows(normalizeUsers(data))
-      } catch (err) {
-        if (!stop) {
-          setRows([])
-          setError(err?.message || '用户列表加载失败')
-        }
-      } finally {
-        if (!stop) setLoading(false)
+  const loadUsers = useCallback(async ({ showLoading = true } = {}) => {
+    if (showLoading) setLoading(true)
+    setError('')
+    try {
+      const list = await fetchAdminUsers()
+      if (!stopRef.current) {
+        setRows(list)
+        setLastFetchedAt(Date.now())
       }
-    }
-    load()
-    return () => {
-      stop = true
+      return true
+    } catch (err) {
+      if (!stopRef.current) {
+        setRows([])
+        setError(err?.message || '用户列表加载失败')
+      }
+      return false
+    } finally {
+      if (!stopRef.current && showLoading) setLoading(false)
     }
   }, [])
 
+  useEffect(() => {
+    stopRef.current = false
+    loadUsers()
+
+    const timer = window.setInterval(() => {
+      loadUsers({ showLoading: false })
+    }, AUTO_REFRESH_MS)
+
+    return () => {
+      stopRef.current = true
+      window.clearInterval(timer)
+    }
+  }, [loadUsers])
   const filteredRows = useMemo(() => {
-    const memberName = filters.memberName.trim().toLowerCase()
-    const memberId = filters.memberId.trim().toLowerCase()
-    const memberAccount = filters.memberAccount.trim().toLowerCase()
-    const userType = filters.userType.trim().toLowerCase()
+    const nickname = appliedFilters.nickname.trim().toLowerCase()
+    const tgId = appliedFilters.tgId.trim().toLowerCase()
+    const username = appliedFilters.username.trim().toLowerCase()
+    const userType = appliedFilters.userType.trim().toLowerCase()
+    const vipOnly = appliedFilters.vipOnly === 'yes'
+
     return rows.filter((row) => {
       if (userType && row.userType !== userType) return false
-      const rowName = String(row.firstName || '').toLowerCase()
-      const rowId = String(row.tgId || '').toLowerCase()
-      const rowAccount = String(row.username || '').toLowerCase()
-      if (memberName && !rowName.includes(memberName)) return false
-      if (memberId && !rowId.includes(memberId)) return false
-      if (memberAccount && !rowAccount.includes(memberAccount)) return false
+      if (vipOnly && !row.vipActive) return false
+      if (nickname && !String(row.nickname || '').toLowerCase().includes(nickname)) return false
+      if (tgId && !String(row.tgId || '').toLowerCase().includes(tgId)) return false
+      const account = String(row.username || '').toLowerCase()
+      if (username && !account.includes(username.replace(/^@/, ''))) return false
       return true
     })
-  }, [rows, filters])
+  }, [rows, appliedFilters])
 
-  const applyFlags = async (row, patch) => {
-    const next = { ...row, ...patch }
-    setSubmittingId(row.id)
+  const total = filteredRows.length
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return filteredRows.slice(start, start + PAGE_SIZE)
+  }, [filteredRows, currentPage])
+
+  useEffect(() => {
+    setPage(1)
+  }, [appliedFilters])
+
+  const onQuery = async () => {
+    setAppliedFilters({ ...inputFilters })
+    setPage(1)
+    setRefreshing(true)
+    await loadUsers({ showLoading: false })
+    setRefreshing(false)
+  }
+
+  const onReset = async () => {
+    const reset = createDefaultInputFilters()
+    setInputFilters(reset)
+    setAppliedFilters(EMPTY_FILTERS)
+    setPage(1)
+    setRefreshing(true)
+    await loadUsers({ showLoading: false })
+    setRefreshing(false)
+  }
+
+  const applyBan = async (row, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setSubmittingId(`${row.id}:ban`)
     setError('')
     try {
-      await updateUserFlags({
-        token: getToken(),
-        userId: row.id,
-        patch: { isBanned: next.isBanned, whitelist: next.whitelist },
-      })
-      setRows((prev) => prev.map((item) => (item.id === row.id ? next : item)))
-    } catch (err) {
-      setError(err?.message || '状态更新失败')
+      const updated = await patchAdminUserFlags(row.id, { isBanned: !row.isBanned })
+      setRows((prev) =>
+        prev.map((item) =>
+          item.id === row.id
+            ? updated || {
+                ...item,
+                isBanned: !row.isBanned,
+                statusLabel: !row.isBanned
+                  ? '已封禁'
+                  : item.vipActive
+                    ? 'VIP'
+                    : TYPE_LABEL[item.userType] || '普通',
+              }
+            : item,
+        ),
+      )    } catch (err) {
+      setError(err?.message || '封禁状态更新失败')
     } finally {
       setSubmittingId('')
     }
   }
 
-  return (
-    <section className="admin-panel">
-      <div className="admin-tools admin-tools-wrap admin-user-filter-row">
-        <label>
-          会员名称
-          <input
-            value={filters.memberName}
-            onChange={(e) => setFilters((prev) => ({ ...prev, memberName: e.target.value }))}
-          />
-        </label>
-        <label>
-          会员ID
-          <input
-            value={filters.memberId}
-            onChange={(e) => setFilters((prev) => ({ ...prev, memberId: e.target.value }))}
-          />
-        </label>
-        <label>
-          会员账号
-          <input
-            value={filters.memberAccount}
-            onChange={(e) => setFilters((prev) => ({ ...prev, memberAccount: e.target.value }))}
-          />
-        </label>
-        <label className="admin-user-type-filter">
-          用户类型
-          <select
-            value={filters.userType}
-            onChange={(e) => setFilters((prev) => ({ ...prev, userType: e.target.value }))}
-          >
-            <option value="">全部</option>
-            <option value="normal">普通</option>
-            <option value="vip">VIP</option>
-            <option value="author">作者</option>
-          </select>
-        </label>
-      </div>
+  const applyWhitelist = async (row, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setSubmittingId(`${row.id}:whitelist`)
+    setError('')
+    try {
+      const updated = await patchAdminUserFlags(row.id, { whitelist: !row.whitelist })
+      setRows((prev) =>
+        prev.map((item) =>
+          item.id === row.id
+            ? updated || {
+                ...item,
+                whitelist: !row.whitelist,
+              }
+            : item,
+        ),
+      )
+    } catch (err) {
+      setError(err?.message || '白名单状态更新失败')
+    } finally {
+      setSubmittingId('')
+    }
+  }
 
+  const listMeta = useMemo(() => {
+    const origin = `数据源 ${getApiOriginLabel()}`
+    if (refreshing) return `${origin} · 正在同步用户数据…`
+    if (lastFetchedAt > 0) {
+      const time = new Date(lastFetchedAt).toLocaleTimeString('zh-CN', { hour12: false })
+      return `${origin} · 共 ${total} 人（TG 用户） · 已同步 ${time} · 每 30 秒自动刷新`
+    }
+    return `${origin} · 共 ${total} 人（TG 用户） · 每 30 秒自动刷新`
+  }, [refreshing, lastFetchedAt, total])
+  return (
+    <section className="admin-users-mgmt">
       {shouldShowError(error) ? <p className="admin-error">{error}</p> : null}
 
-      <div className="admin-table-wrap">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Avatar</th>
-              <th>First Name</th>
-              <th>Username</th>
-              <th>TG ID</th>
-              <th>用户类型</th>
-              <th>分享任务完成</th>
-              <th>进群任务完成</th>
-              <th>累计免费时长(分钟)</th>
-              <th>封禁</th>
-              <th>IP地点</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.length ? (
-              filteredRows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    {row.avatar ? (
-                      <img className="admin-user-avatar-cell" src={row.avatar} alt="avatar" />
-                    ) : (
-                      '-'
-                    )}
-                  </td>
-                  <td>{row.firstName}</td>
-                  <td>{row.username}</td>
-                  <td>{row.tgId}</td>
-                  <td>{TYPE_LABEL[row.userType] || '普通'}</td>
-                  <td>{row.tasks.shareAt || '-'}</td>
-                  <td>{row.tasks.groupAt || '-'}</td>
-                  <td>{row.tasks.freeMinutes}</td>
-                  <td>
-                    <button
-                      className="admin-btn"
-                      type="button"
-                      disabled={submittingId === row.id}
-                      onClick={() => applyFlags(row, { isBanned: !row.isBanned })}
-                    >
-                      {row.isBanned ? '解除封禁' : '封禁'}
-                    </button>
-                  </td>
-                  <td>{row.ipLocation}</td>
-                </tr>
-              ))
-            ) : (
+      <div className="admin-reading-mgmt-toolbar admin-users-mgmt-toolbar">
+        <div className="admin-users-mgmt-filters">
+          <label className="admin-reading-mgmt-field admin-users-mgmt-field--name">
+            <span>昵称</span>
+            <input
+              value={inputFilters.nickname}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, nickname: e.target.value }))}
+              placeholder="搜索昵称"
+            />
+          </label>
+          <label className="admin-reading-mgmt-field admin-users-mgmt-field--id">
+            <span>TG ID</span>
+            <input
+              value={inputFilters.tgId}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, tgId: e.target.value }))}
+              placeholder="Telegram ID"
+            />
+          </label>
+          <label className="admin-reading-mgmt-field admin-users-mgmt-field--account">
+            <span>TG 用户名</span>
+            <input
+              value={inputFilters.username}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, username: e.target.value }))}
+              placeholder="@username"
+            />
+          </label>
+          <label className="admin-reading-mgmt-field admin-users-mgmt-field--type">
+            <span>用户类型</span>
+            <select
+              value={inputFilters.userType}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, userType: e.target.value }))}
+            >
+              <option value="">全部</option>
+              <option value="normal">普通</option>
+              <option value="vip">VIP</option>
+              <option value="author">作者</option>
+            </select>
+          </label>
+          <label className="admin-reading-mgmt-field admin-users-mgmt-field--vip">
+            <span>VIP</span>
+            <select
+              value={inputFilters.vipOnly}
+              onChange={(e) => setInputFilters((prev) => ({ ...prev, vipOnly: e.target.value }))}
+            >
+              <option value="">全部</option>
+              <option value="yes">仅 VIP</option>
+            </select>
+          </label>
+        </div>
+        <div className="admin-reading-mgmt-actions">
+          <button className="admin-btn admin-btn-primary" type="button" disabled={refreshing} onClick={onQuery}>
+            {refreshing ? '查询中…' : '查询'}
+          </button>
+          <button className="admin-btn" type="button" disabled={refreshing} onClick={onReset}>
+            重置
+          </button>
+        </div>
+      </div>
+
+      <div className={`admin-novel-mgmt-table-card${refreshing ? ' is-refreshing' : ''}`}>
+        <div className="admin-novel-mgmt-table-head">
+          <h3>用户管理</h3>
+          <span className="admin-novel-mgmt-meta">{listMeta} · 名称 / 用户名 / 用户ID 可点击进入账户资料</span>
+        </div>
+        <div className="admin-table-wrap admin-novel-mgmt-table-wrap">
+          <table className="admin-table admin-novel-mgmt-table admin-users-mgmt-table">
+            <thead>
               <tr>
-                <td colSpan={10} className="admin-table-empty">
-                  {loading ? '加载中...' : '暂无记录'}
-                </td>
+                <th>头像</th>
+                <th>名称</th>
+                <th>用户名</th>
+                <th>用户ID</th>
+                <th>VIP</th>
+                <th>套餐</th>
+                <th>到期时间</th>
+                <th>消费</th>
+                <th>评论</th>
+                <th>收藏</th>
+                <th>阅读</th>
+                <th>状态</th>
+                <th>白名单</th>
+                <th>封禁</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pagedRows.length ? (
+                pagedRows.map((row) => {
+                  const banBusy = submittingId === `${row.id}:ban`
+                  const whitelistBusy = submittingId === `${row.id}:whitelist`
+                  return (
+                    <tr key={row.id} className="admin-users-mgmt-row">
+                      <td>
+                        <Link className="admin-users-mgmt-row-link" to={`/admin/account?tgId=${encodeURIComponent(row.tgId)}`}>
+                          {row.avatar ? (
+                            <img className="admin-users-mgmt-avatar" src={resolveApiAssetUrl(row.avatar)} alt="" />
+                          ) : (                            <span className="admin-users-mgmt-avatar-empty">无</span>
+                          )}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link
+                          className="admin-users-mgmt-row-link admin-users-mgmt-name"
+                          to={buildAccountProfileLink(row, 'name')}
+                        >
+                          {row.nickname}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link
+                          className="admin-users-mgmt-row-link admin-users-mgmt-username"
+                          to={buildAccountProfileLink(row, 'username')}
+                        >
+                          {formatUsername(row.username)}
+                        </Link>
+                      </td>
+                      <td>
+                        <Link
+                          className="admin-users-mgmt-row-link admin-users-mgmt-tgid-link"
+                          to={buildAccountProfileLink(row, 'id')}
+                        >
+                          {row.tgId}
+                        </Link>
+                      </td>
+                      <td>
+                        <span className={`admin-users-mgmt-vip ${row.vipActive ? 'is-yes' : 'is-no'}`}>
+                          {row.vipActive ? '是' : '否'}
+                        </span>
+                      </td>
+                      <td className="admin-users-mgmt-package">{row.packageName}</td>
+                      <td className="admin-novel-mgmt-time">{row.vipExpiresAt}</td>
+                      <td className="admin-novel-mgmt-num">{formatSpend(row.spendUsd)}</td>
+                      <td className="admin-novel-mgmt-num">{formatCount(row.commentCount)}</td>
+                      <td className="admin-novel-mgmt-num">{formatCount(row.favoriteCount)}</td>
+                      <td className="admin-novel-mgmt-num">{formatCount(row.readCount)}</td>
+                      <td>
+                        <span
+                          className={[
+                            'admin-users-mgmt-status',
+                            row.isBanned ? 'is-banned' : '',
+                            row.isOnline ? 'is-online' : '',
+                            row.userType === 'author' ? 'is-author' : '',
+                            row.vipActive ? 'is-vip' : '',
+                          ].join(' ')}
+                        >
+                          {row.statusLabel}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className={`admin-novel-mgmt-act ${row.whitelist ? 'admin-novel-mgmt-act--success' : ''}`}
+                          type="button"
+                          disabled={whitelistBusy}
+                          onClick={(event) => applyWhitelist(row, event)}
+                        >
+                          {whitelistBusy ? '处理中' : row.whitelist ? '移出' : '加入'}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className={`admin-novel-mgmt-act ${row.isBanned ? 'admin-novel-mgmt-act--danger' : ''}`}
+                          type="button"
+                          disabled={banBusy}
+                          onClick={(event) => applyBan(row, event)}
+                        >
+                          {banBusy ? '处理中' : row.isBanned ? '解封' : '封禁'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              ) : (
+                <tr>
+                  <td colSpan={14} className="admin-table-empty">
+                    {loading || refreshing ? '加载中...' : '暂无用户'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="admin-pagination-row admin-novel-mgmt-pagination">
+        <p className="admin-pagination-meta">共 {total} 人</p>
+        <div className="admin-pagination-controls">
+          <button
+            className="admin-btn"
+            type="button"
+            disabled={currentPage <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            上一页
+          </button>
+          <span>
+            第 {currentPage} / {totalPages} 页
+          </span>
+          <button
+            className="admin-btn"
+            type="button"
+            disabled={currentPage >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            下一页
+          </button>
+        </div>
       </div>
     </section>
   )
 }
-

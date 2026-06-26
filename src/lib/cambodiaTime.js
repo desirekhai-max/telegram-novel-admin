@@ -47,3 +47,16 @@ export function getSettlementDateString(offsetDays = 0, date = new Date()) {
   settlementBaseUtc.setUTCDate(settlementBaseUtc.getUTCDate() + offsetDays)
   return formatApiDate(settlementBaseUtc)
 }
+
+/** 与 APP 后端一致：金边时区每日 09:00 为结算起点 */
+export function getSettlementStartMs(nowMs = Date.now()) {
+  const tzOffsetMs = 7 * 60 * 60 * 1000
+  const shifted = new Date(nowMs + tzOffsetMs)
+  const y = shifted.getUTCFullYear()
+  const m = shifted.getUTCMonth()
+  const d = shifted.getUTCDate()
+  const localDayStartMs = Date.UTC(y, m, d, 0, 0, 0, 0)
+  const settlementLocalMs = localDayStartMs + 9 * 60 * 60 * 1000
+  const settlementUtcMs = settlementLocalMs - tzOffsetMs
+  return nowMs >= settlementUtcMs ? settlementUtcMs : settlementUtcMs - 24 * 60 * 60 * 1000
+}

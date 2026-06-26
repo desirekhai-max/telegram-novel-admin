@@ -1,8 +1,9 @@
 import { useId, useRef, useState } from 'react'
+import { resolveApiAssetUrl } from '../lib/apiBase.js'
 import { deleteNovelCoverFile, uploadNovelCover } from '../lib/novelsAdminApi.js'
 
 const ACCEPT = 'image/jpeg,image/png,image/webp'
-const MAX_BYTES = 1024 * 1024
+const MAX_BYTES = 2 * 1024 * 1024
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -19,7 +20,7 @@ function validateCoverFile(file) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) {
     throw new Error('仅支持 JPG、PNG、WebP')
   }
-  if (file.size > MAX_BYTES) throw new Error('图片不能超过 1MB')
+  if (file.size > MAX_BYTES) throw new Error('图片不能超过 2MB')
 }
 
 export default function NovelCoverUpload({ coverUrl, onChange, disabled = false }) {
@@ -70,13 +71,15 @@ export default function NovelCoverUpload({ coverUrl, onChange, disabled = false 
     }
   }
 
+  const previewUrl = coverUrl ? resolveApiAssetUrl(coverUrl) : ''
+
   return (
     <div className="admin-cover-upload">
       <span className="admin-cover-upload__label">封面</span>
       <div className="admin-cover-upload__body">
-        <div className="admin-cover-upload__preview" aria-hidden={!coverUrl}>
-          {coverUrl ? (
-            <img src={coverUrl} alt="封面预览" className="admin-cover-upload__img" />
+        <div className="admin-cover-upload__preview" aria-hidden={!previewUrl}>
+          {previewUrl ? (
+            <img src={previewUrl} alt="封面预览" className="admin-cover-upload__img" />
           ) : (
             <div className="admin-cover-upload__placeholder">5:7</div>
           )}
@@ -110,7 +113,7 @@ export default function NovelCoverUpload({ coverUrl, onChange, disabled = false 
             </button>
           ) : null}
           <p className="admin-cover-upload__hint">
-            比例 5:7，建议 600×840 或 1200×1680，JPG/WebP，≤1MB
+            比例 5:7，建议 600×840 或 1200×1680，JPG/WebP，≤2MB
           </p>
           {localError ? <p className="admin-cover-upload__error">{localError}</p> : null}
         </div>

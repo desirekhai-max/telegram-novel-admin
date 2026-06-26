@@ -1,921 +1,584 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchUsers } from '../lib/adminApi.js'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { adminUserAction, adminUserVipPurchase, fetchAdminUserProfile, fetchUsers } from '../lib/adminApi.js'
 import { getToken } from '../lib/adminAuth.js'
+import { resolveApiAssetUrl } from '../lib/apiBase.js'
+import { fetchAdminVipPlans } from '../lib/vipPlansAdminApi.js'
+import { patchAdminUserFlags } from '../lib/usersApi.js'
 
-const TYPE_LABEL = {
-  normal: '普通',
-  vip: 'VIP',
-  author: '作者',
-}
-const BAN_OVERRIDE_STORAGE_KEY = 'admin_account_ban_overrides'
-const USER_TYPE_OVERRIDE_STORAGE_KEY = 'admin_account_type_overrides'
-const MEMBERSHIP_OVERRIDE_STORAGE_KEY = 'admin_account_membership_overrides'
-const FINANCE_OVERRIDE_STORAGE_KEY = 'admin_account_finance_overrides'
-const PURCHASE_MINUTES_MAP = {
-  normal: { 1: 180, 3: 720, 5: 1440 },
-  author: { 1: 300, 3: 1080, 5: 2160 },
+const VIP_PLAN_LABELS = {
+  vip_entry: '入门',
+  vip_standard: '标准',
+  vip_premium: '高级',
 }
 
-function hasReadingVip(row) {
-  if (row?.userType === 'normal') return false
-  return Number(row?.remainingMinutes || 0) > 0 && String(row?.expiresAt || '').trim() !== '-'
-}
-
-function getDefaultMinutesByBaseType(baseType) {
-  const tier = baseType === 'author' ? 'author' : 'normal'
-  return PURCHASE_MINUTES_MAP[tier]?.[1] || 0
-}
-
-const DEMO_ACCOUNT_ROWS = [
-  {
-    id: 'demo-normal-1',
-    avatar: '',
-    nickname: '演示普通会员',
-    username: 'demo_normal',
-    tgId: '10001',
-    userType: 'normal',
-    registeredAt: '2026-04-20 09:00:00',
-    registerIp: 'Phnom Penh',
-    loginIp: 'Phnom Penh',
-    remainingMinutes: 120,
-    expiresAt: '2026-04-30 18:00:00',
-    banType: 'normal',
-    financeRows: [{ id: 'f1', amount: '$1', abaNo: 'ABA-10001', status: '成功' }],
-  },
-  {
-    id: 'demo-vip-1',
-    avatar: '',
-    nickname: '演示VIP会员',
-    username: 'demo_vip',
-    tgId: '10002',
-    userType: 'vip',
-    registeredAt: '2026-04-21 10:20:00',
-    registerIp: 'Siem Reap',
-    loginIp: 'Phnom Penh',
-    remainingMinutes: 560,
-    expiresAt: '2026-06-01 08:00:00',
-    banType: 'normal',
-    financeRows: [{ id: 'f2', amount: '$5', abaNo: 'ABA-10002', status: '成功' }],
-  },
-  {
-    id: 'demo-author-1',
-    avatar: '',
-    nickname: '演示作者会员',
-    username: 'demo_author',
-    tgId: '10003',
-    userType: 'author',
-    registeredAt: '2026-04-22 14:40:00',
-    registerIp: 'Battambang',
-    loginIp: 'Battambang',
-    remainingMinutes: 0,
-    expiresAt: '-',
-    banType: 'normal',
-    financeRows: [{ id: 'f3', amount: '$3', abaNo: 'ABA-10003', status: '成功' }],
-  },
+const VIP_PURCHASE_FALLBACK = [
+  { planId: 'vip_entry', priceUsdLabel: '$1', durationHours: 3 },
+  { planId: 'vip_standard', priceUsdLabel: '$3', durationHours: 12 },
+  { planId: 'vip_premium', priceUsdLabel: '$5', durationHours: 24 },
 ]
 
-function normalizeType(value) {
-  const text = String(value || '').trim().toLowerCase()
-  if (text === 'vip') return 'vip'
-  if (text === 'author') return 'author'
-  return 'normal'
-}
-
-function normalizeFinanceRows(row = {}) {
-  const rowLevelTime =
-    row.lastPurchaseTime ||
-    row.latestOrderTime ||
-    row.orderTime ||
-    row.purchaseTime ||
-    row.paidAt ||
-    row.payTime ||
-    row.createdAt ||
-    row.updatedAt ||
-    '-'
-  const source = Array.isArray(row.financeRecords)
-    ? row.financeRecords
-    : Array.isArray(row.rechargeRecords)
-      ? row.rechargeRecords
-      : Array.isArray(row.transactions)
-        ? row.transactions
-        : []
-  return source.map((item, idx) => ({
-    id: String(item.id || item.orderNo || idx),
-    amount: item.amount || item.rechargeAmount || '$0',
-    payMethod: item.payMethod || item.channel || item.abaNo || item.abaOrderNo || item.bankRef || '-',
-    status: String(item.status || item.result || '-'),
-    time:
-      item.createdAt ||
-      item.time ||
-      item.paidAt ||
-      item.payTime ||
-      item.purchaseTime ||
-      item.orderTime ||
-      item.created_time ||
-      item.pay_at ||
-      item.updatedAt ||
-      rowLevelTime ||
-      '-',
-  }))
-}
-
-function normalizeUsers(data) {
-  const list = Array.isArray(data?.users) ? data.users : Array.isArray(data) ? data : []
-  return list.map((row, idx) => ({
-    id: String(row.tgId || row.telegramId || row.userId || row.id || idx),
-    avatar: row.avatar || row.avatarUrl || row.photoUrl || '',
-    nickname: row.firstName || row.name || row.displayName || '-',
-    username: row.username || row.tgUsername || '-',
-    tgId: String(row.tgId || row.telegramId || row.userId || row.id || '-'),
-    userType: normalizeType(row.userType || row.role || row.level),
-    registeredAt: row.registeredAt || row.createdAt || row.registerTime || '-',
-    registerIp: row.registerIp || row.registerLocation || row.registerCity || '-',
-    loginIp: row.loginIp || row.currentIp || row.loginLocation || '-',
-    remainingMinutes: Number(row.remainingMinutes ?? row.leftMinutes ?? row.durationLeft ?? 0),
-    expiresAt: row.expiresAt || row.expiredAt || row.expireTime || '-',
-    banType: row.isBanned || row.banned ? 'banned' : 'normal',
-    financeRows: normalizeFinanceRows(row),
-  }))
-}
-
-function loadBanOverrides() {
-  try {
-    const text = window.localStorage.getItem(BAN_OVERRIDE_STORAGE_KEY)
-    if (!text) return {}
-    const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveBanOverrides(map) {
-  try {
-    window.localStorage.setItem(BAN_OVERRIDE_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // ignore localStorage failures silently
-  }
-}
-
-function loadUserTypeOverrides() {
-  try {
-    const text = window.localStorage.getItem(USER_TYPE_OVERRIDE_STORAGE_KEY)
-    if (!text) return {}
-    const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveUserTypeOverrides(map) {
-  try {
-    window.localStorage.setItem(USER_TYPE_OVERRIDE_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // ignore localStorage failures silently
-  }
-}
-
-function loadMembershipOverrides() {
-  try {
-    const text = window.localStorage.getItem(MEMBERSHIP_OVERRIDE_STORAGE_KEY)
-    if (!text) return {}
-    const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveMembershipOverrides(map) {
-  try {
-    window.localStorage.setItem(MEMBERSHIP_OVERRIDE_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // ignore localStorage failures silently
-  }
-}
-
-function loadFinanceOverrides() {
-  try {
-    const text = window.localStorage.getItem(FINANCE_OVERRIDE_STORAGE_KEY)
-    if (!text) return {}
-    const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveFinanceOverrides(map) {
-  try {
-    window.localStorage.setItem(FINANCE_OVERRIDE_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // ignore localStorage failures silently
-  }
-}
-
-function resolveOverrideValue(map, row) {
-  if (!map || typeof map !== 'object') return undefined
-  const byId = map[row.id]
-  if (byId !== undefined) return byId
-  return map[row.tgId]
-}
-
-function applyBanOverrides(rows, overrides) {
-  return rows.map((row) => {
-    const override = resolveOverrideValue(overrides, row)
-    if (override !== 'normal' && override !== 'banned') return row
-    return { ...row, banType: override }
-  })
-}
-
-function applyUserTypeOverrides(rows, overrides) {
-  return rows.map((row) => {
-    const override = resolveOverrideValue(overrides, row)
-    if (override !== 'normal' && override !== 'vip' && override !== 'author') return row
-    return { ...row, userType: override }
-  })
-}
-
-function applyMembershipOverrides(rows, overrides) {
-  return rows.map((row) => {
-    const override = resolveOverrideValue(overrides, row)
-    if (!override || typeof override !== 'object') return row
-    const remainingMinutes = Number(override.remainingMinutes)
-    const expiresAt = String(override.expiresAt || '').trim()
-    if (!Number.isFinite(remainingMinutes) || !expiresAt) return row
-    return {
-      ...row,
-      remainingMinutes: Math.max(0, remainingMinutes),
-      expiresAt,
-    }
-  })
-}
-
-function applyFinanceOverrides(rows, overrides) {
-  return rows.map((row) => {
-    const override = resolveOverrideValue(overrides, row)
-    if (!Array.isArray(override) || !override.length) return row
-    return {
-      ...row,
-      financeRows: override.map((item, idx) => ({
-        id: String(item.id || `manual-${idx}`),
-        amount: String(item.amount || '-'),
-        payMethod: String(item.payMethod || item.abaNo || '-'),
-        status: String(item.status || '-'),
-        time: String(item.time || '-'),
-      })),
-    }
-  })
-}
-
-function buildManualFinanceRows(options = {}) {
-  const {
-    amount = '管理手动',
-    payMethod = '管理手动',
-    status = '管理手动',
-    time = formatDateTimeText(new Date()),
-  } = options
-  const id = `manual-${Date.now()}`
-  return [
-    {
-      id,
-      amount,
-      payMethod,
-      status,
-      time,
-    },
-  ]
-}
-
-function toCsv(rows) {
-  const headers = [
-    '昵称',
-    '用户名',
-    'ID',
-    '用户类型',
-    '剩余时长(分钟)',
-    '过期时间',
-    '封禁类型',
-    '注册IP',
-    '登录IP',
-  ]
-  const escapeCell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
-  const lines = rows.map((row) =>
-    [
-      row.nickname,
-      row.username,
-      row.tgId,
-      TYPE_LABEL[row.userType] || '普通',
-      row.remainingMinutes,
-      row.expiresAt,
-      row.banType === 'banned' ? '封禁' : '正常',
-      row.registerIp,
-      row.loginIp,
-    ]
-      .map(escapeCell)
-      .join(','),
+function ProfileSection({ title, children }) {
+  return (
+    <section className="admin-account-profile-section">
+      <div className="admin-account-profile-section-head">
+        <span className="admin-account-profile-section-line" aria-hidden />
+        <h3>{title}</h3>
+        <span className="admin-account-profile-section-line" aria-hidden />
+      </div>
+      <div className="admin-account-profile-section-body">{children}</div>
+    </section>
   )
-  return [headers.join(','), ...lines].join('\n')
 }
 
-function downloadCsv(filename, content) {
-  const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-function formatDateTimeText(date) {
-  const pad2 = (n) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
-}
-
-function parseDateTimeText(value) {
-  const text = String(value || '').trim()
-  const matched = text.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
+function ProfileGrid({ rows }) {
+  return (
+    <dl className="admin-account-profile-grid">
+      {rows.map((row) => (
+        <div key={row.label} className={row.wide ? 'is-wide' : undefined}>
+          <dt>{row.label}</dt>
+          <dd>{row.value ?? '—'}</dd>
+        </div>
+      ))}
+    </dl>
   )
-  if (!matched) return null
-  const [, y, m, d, hh, mm, ss = '00'] = matched
-  const date = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss))
-  return Number.isNaN(date.getTime()) ? null : date
 }
 
-function applyMembershipExpiry(rows, options = {}) {
-  const { syncOverrides = false } = options
-  const now = Date.now()
-  const expiredVipIds = []
-  const nextRows = rows.map((row) => {
-    if (!hasReadingVip(row)) return row
-    const expiresAt = parseDateTimeText(row.expiresAt)
-    if (!expiresAt || expiresAt.getTime() > now) return row
-    if (row.userType === 'vip') expiredVipIds.push(row.id)
+function StatusBadge({ status, variant }) {
+  const className = variant === 'banned' ? 'is-banned' : variant === 'vip' ? 'is-vip' : ''
+  return <span className={`admin-account-profile-badge ${className}`.trim()}>{status}</span>
+}
+
+function formatMoney(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return String(value || '—')
+  return `$${n.toFixed(2)}`
+}
+
+function normalizeUserRows(data) {
+  const list = Array.isArray(data?.users) ? data.users : []
+  return list.map((row, idx) => {
+    const tgId = String(row.tgId || row.telegramId || row.userId || row.id || idx)
     return {
-      ...row,
-      userType: row.userType === 'vip' ? 'normal' : row.userType,
-      remainingMinutes: 0,
-      expiresAt: '-',
+      tgId,
+      nickname: String(row.nickname || row.firstName || row.displayName || '').trim(),
+      username: String(row.username || row.tgUsername || '').trim().replace(/^@/, ''),
+      whitelist: Boolean(row?.whitelist),
     }
   })
-  if (syncOverrides && expiredVipIds.length) {
-    const typeOverrides = loadUserTypeOverrides()
-    const membershipOverrides = loadMembershipOverrides()
-    let changed = false
-    expiredVipIds.forEach((id) => {
-      if (Object.prototype.hasOwnProperty.call(typeOverrides, id)) {
-        delete typeOverrides[id]
-        changed = true
-      }
-      if (Object.prototype.hasOwnProperty.call(membershipOverrides, id)) {
-        delete membershipOverrides[id]
-        changed = true
-      }
-    })
-    if (changed) {
-      saveUserTypeOverrides(typeOverrides)
-      saveMembershipOverrides(membershipOverrides)
-    }
+}
+
+function matchUserRow(row, { nickname, username, userId }) {
+  const idKey = String(userId || '').trim()
+  if (idKey && row.tgId !== idKey) return false
+  const nameKey = String(nickname || '').trim().toLowerCase()
+  if (nameKey && !String(row.nickname || '').toLowerCase().includes(nameKey)) return false
+  const userKey = String(username || '').trim().toLowerCase().replace(/^@/, '')
+  if (userKey && !String(row.username || '').toLowerCase().includes(userKey)) return false
+  return true
+}
+
+async function resolveSearchTgId({ nickname, username, userId }) {
+  const id = String(userId || '').trim()
+  const name = String(nickname || '').trim()
+  const account = String(username || '').trim().replace(/^@/, '')
+  if (!id && !name && !account) return { tgId: '', error: '请至少填写一项查询条件' }
+
+  if (id && !name && !account) {
+    return { tgId: id, error: '' }
   }
-  return nextRows
+
+  const data = await fetchUsers({ token: getToken() })
+  const rows = normalizeUserRows(data)
+  const matched = rows.filter((row) => matchUserRow(row, { nickname: name, username: account, userId: id }))
+  if (!matched.length) return { tgId: '', error: '未找到匹配用户' }
+  if (matched.length > 1) return { tgId: '', error: '匹配到多个用户，请补充用户ID缩小范围' }
+  return { tgId: matched[0].tgId, error: '' }
+}
+
+function pickVipPurchasePlans(payload, role) {
+  const list =
+    role === 'author'
+      ? payload?.plansAuthor
+      : payload?.plans
+  if (!Array.isArray(list) || !list.length) return VIP_PURCHASE_FALLBACK
+  return [...list].sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0))
+}
+
+function vipPurchaseButtonLabel(plan) {
+  const planId = String(plan?.planId || '').trim()
+  const tier = VIP_PLAN_LABELS[planId] || planId || '套餐'
+  const price = String(plan?.priceUsdLabel || '').trim()
+  return price ? `VIP内购 · ${tier} ${price}` : `VIP内购 · ${tier}`
+}
+
+function applyProfileToSearchInputs(data, setters) {
+  const basic = data?.basic
+  if (!basic) return
+  const nickname = String(basic.nickname || '').trim()
+  const username = String(basic.username || '').trim().replace(/^@/, '')
+  const tgId = String(basic.telegramId || '').trim()
+  if (nickname && nickname !== '—') setters.setNicknameInput(nickname)
+  if (username && username !== '—') setters.setUsernameInput(username)
+  if (tgId) setters.setUserIdInput(tgId)
 }
 
 export default function AccountProfilePage() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const [nicknameInput, setNicknameInput] = useState('')
+  const [usernameInput, setUsernameInput] = useState('')
+  const [userIdInput, setUserIdInput] = useState('')
+  const [activeTgId, setActiveTgId] = useState('')
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [linkRefreshFlash, setLinkRefreshFlash] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [actionLoading, setActionLoading] = useState('')
+  const [vipPlansPayload, setVipPlansPayload] = useState(null)
+  const [whitelist, setWhitelist] = useState(false)
   const [error, setError] = useState('')
-  const [rows, setRows] = useState([])
-  const [queryTick, setQueryTick] = useState(0)
-  const [selectedId, setSelectedId] = useState('')
-  const [memberNameInput, setMemberNameInput] = useState('')
-  const [memberIdInput, setMemberIdInput] = useState('')
-  const [memberAccountInput, setMemberAccountInput] = useState('')
-  const [banTypeInput, setBanTypeInput] = useState('all')
-  const [typeInput, setTypeInput] = useState('all')
-  const [filters, setFilters] = useState({
-    memberName: '',
-    memberId: '',
-    memberAccount: '',
-    banType: 'all',
-    type: 'all',
-  })
-  const [adjustInput, setAdjustInput] = useState('0')
 
   useEffect(() => {
-    let stop = false
-    const load = async () => {
-      setLoading(true)
-      setError('')
-      const banOverrides = loadBanOverrides()
-      const userTypeOverrides = loadUserTypeOverrides()
-      const membershipOverrides = loadMembershipOverrides()
-      const financeOverrides = loadFinanceOverrides()
-      try {
-        const data = await fetchUsers({ token: getToken() })
-        const normalized = normalizeUsers(data)
-        if (!stop) {
-          const sourceRows = normalized.length ? normalized : DEMO_ACCOUNT_ROWS
-          const withTypes = applyUserTypeOverrides(sourceRows, userTypeOverrides)
-          const withMembership = applyMembershipOverrides(withTypes, membershipOverrides)
-          const withFinance = applyFinanceOverrides(withMembership, financeOverrides)
-          const withExpiry = applyMembershipExpiry(withFinance, { syncOverrides: true })
-          const finalRows = applyBanOverrides(withExpiry, banOverrides)
-          setRows(finalRows)
-          setSelectedId(finalRows[0]?.id || '')
-        }
-      } catch (err) {
-        if (!stop) {
-          const withTypes = applyUserTypeOverrides(DEMO_ACCOUNT_ROWS, userTypeOverrides)
-          const withMembership = applyMembershipOverrides(withTypes, membershipOverrides)
-          const withFinance = applyFinanceOverrides(withMembership, financeOverrides)
-          const withExpiry = applyMembershipExpiry(withFinance, { syncOverrides: true })
-          const finalRows = applyBanOverrides(withExpiry, banOverrides)
-          setRows(finalRows)
-          setSelectedId(finalRows[0]?.id || '')
-          setError(err?.message || '账户资料加载失败')
-        }
-      } finally {
-        if (!stop) setLoading(false)
-      }
-    }
-    load()
-    const timer = window.setInterval(load, 60 * 1000)
+    let cancelled = false
+    fetchAdminVipPlans()
+      .then((data) => {
+        if (!cancelled) setVipPlansPayload(data)
+      })
+      .catch(() => {
+        if (!cancelled) setVipPlansPayload(null)
+      })
     return () => {
-      stop = true
-      window.clearInterval(timer)
+      cancelled = true
     }
-  }, [queryTick])
-
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      const name = String(row.nickname || '').toLowerCase()
-      const id = String(row.tgId || '').toLowerCase()
-      const account = String(row.username || '').toLowerCase()
-      if (filters.type !== 'all' && row.userType !== filters.type) return false
-      if (filters.banType !== 'all' && row.banType !== filters.banType) return false
-      if (filters.memberName.trim() && !name.includes(filters.memberName.trim().toLowerCase())) return false
-      if (filters.memberId.trim() && !id.includes(filters.memberId.trim().toLowerCase())) return false
-      if (filters.memberAccount.trim() && !account.includes(filters.memberAccount.trim().toLowerCase())) return false
-      return true
-    })
-  }, [rows, filters])
-
-  const selected = useMemo(() => {
-    return filteredRows.find((row) => row.id === selectedId) || filteredRows[0] || null
-  }, [filteredRows, selectedId])
-
-  useEffect(() => {
-    if (!selected && filteredRows.length) setSelectedId(filteredRows[0].id)
-  }, [selected, filteredRows])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setRows((prev) => applyMembershipExpiry(prev, { syncOverrides: true }))
-    }, 1000)
-    return () => window.clearInterval(timer)
   }, [])
 
-  const patchSelected = (patch) => {
-    if (!selected) return
-    setRows((prev) => {
-      const shouldUseManualFinance =
-        Object.prototype.hasOwnProperty.call(patch, 'userType') ||
-        Object.prototype.hasOwnProperty.call(patch, 'remainingMinutes') ||
-        Object.prototype.hasOwnProperty.call(patch, 'expiresAt')
-      const hasFinanceRowsPatch = Object.prototype.hasOwnProperty.call(patch, 'financeRows')
-      const mergedPatch =
-        shouldUseManualFinance && !hasFinanceRowsPatch ? { ...patch, financeRows: buildManualFinanceRows() } : patch
-      const nextRows = prev.map((row) => {
-        if (row.id !== selected.id) return row
-        const nextRow = { ...row, ...mergedPatch }
-        if (hasFinanceRowsPatch || (shouldUseManualFinance && !hasFinanceRowsPatch)) {
-          const appendRows = Array.isArray(mergedPatch.financeRows) ? mergedPatch.financeRows : []
-          nextRow.financeRows = [...(Array.isArray(row.financeRows) ? row.financeRows : []), ...appendRows]
-        }
-        return nextRow
+  const loadProfile = useCallback(async (tgId) => {
+    const id = String(tgId || '').trim()
+    if (!id) {
+      setProfile(null)
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const data = await fetchAdminUserProfile({ token: getToken(), tgId: id })
+      if (!data) throw new Error('未找到该用户')
+      setProfile(data)
+      try {
+        const list = await fetchUsers({ token: getToken() })
+        const rows = normalizeUserRows(list)
+        const row = rows.find((item) => item.tgId === id)
+        setWhitelist(Boolean(row?.whitelist))
+      } catch {
+        setWhitelist(false)
+      }
+      applyProfileToSearchInputs(data, { setNicknameInput, setUsernameInput, setUserIdInput })
+    } catch (err) {
+      setProfile(null)
+      setError(err?.message || '账户资料加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const tgId = String(searchParams.get('tgId') || '').trim()
+    const from = String(searchParams.get('from') || 'id').trim()
+    const nickname = String(searchParams.get('nickname') || '').trim()
+    const username = String(searchParams.get('username') || '').trim().replace(/^@/, '')
+
+    setActiveTgId(tgId)
+    if (from === 'name') {
+      setNicknameInput(nickname)
+      setUsernameInput('')
+      setUserIdInput(tgId)
+    } else if (from === 'username') {
+      setNicknameInput('')
+      setUsernameInput(username)
+      setUserIdInput(tgId)
+    } else {
+      setNicknameInput('')
+      setUsernameInput('')
+      setUserIdInput(tgId)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    if (activeTgId) loadProfile(activeTgId)
+    else setProfile(null)
+  }, [activeTgId, loadProfile])
+
+  const onSearch = async () => {
+    setSearching(true)
+    setError('')
+    try {
+      const { tgId, error: resolveError } = await resolveSearchTgId({
+        nickname: nicknameInput,
+        username: usernameInput,
+        userId: userIdInput,
       })
-      const selectedNext = nextRows.find((row) => row.id === selected.id)
-      if (Object.prototype.hasOwnProperty.call(patch, 'userType')) {
-        const typeOverrides = loadUserTypeOverrides()
-        typeOverrides[selected.id] = patch.userType
-        typeOverrides[selected.tgId] = patch.userType
-        saveUserTypeOverrides(typeOverrides)
+      if (resolveError) {
+        setProfile(null)
+        setActiveTgId('')
+        setError(resolveError)
+        return
       }
-      if (Object.prototype.hasOwnProperty.call(patch, 'banType')) {
-        const overrides = loadBanOverrides()
-        overrides[selected.id] = patch.banType
-        overrides[selected.tgId] = patch.banType
-        saveBanOverrides(overrides)
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(patch, 'remainingMinutes') ||
-        Object.prototype.hasOwnProperty.call(patch, 'expiresAt')
-      ) {
-        const membershipOverrides = loadMembershipOverrides()
-        const prev = membershipOverrides[selected.id] || membershipOverrides[selected.tgId] || {}
-        const nextOverride = {
-          ...prev,
-          ...(Object.prototype.hasOwnProperty.call(patch, 'remainingMinutes')
-            ? { remainingMinutes: patch.remainingMinutes }
-            : {}),
-          ...(Object.prototype.hasOwnProperty.call(patch, 'expiresAt') ? { expiresAt: patch.expiresAt } : {}),
-        }
-        membershipOverrides[selected.id] = nextOverride
-        membershipOverrides[selected.tgId] = nextOverride
-        saveMembershipOverrides(membershipOverrides)
-      }
-      if (Object.prototype.hasOwnProperty.call(patch, 'financeRows')) {
-        const financeOverrides = loadFinanceOverrides()
-        const finalRows = Array.isArray(selectedNext?.financeRows) ? selectedNext.financeRows : []
-        financeOverrides[selected.id] = finalRows
-        financeOverrides[selected.tgId] = finalRows
-        saveFinanceOverrides(financeOverrides)
-      }
-      if (!Object.prototype.hasOwnProperty.call(patch, 'financeRows') && shouldUseManualFinance) {
-        const financeOverrides = loadFinanceOverrides()
-        const finalRows = Array.isArray(selectedNext?.financeRows) ? selectedNext.financeRows : []
-        financeOverrides[selected.id] = finalRows
-        financeOverrides[selected.tgId] = finalRows
-        saveFinanceOverrides(financeOverrides)
-      }
-      return nextRows
-    })
-  }
-
-  const adjustMinutes = (direction) => {
-    const n = Math.max(0, Number(adjustInput) || 0)
-    if (!n) return
-    const delta = direction === 'plus' ? n : -n
-    const nextRemaining = Math.max(0, selected.remainingMinutes + delta)
-    const nextExpiresAt = nextRemaining > 0 ? new Date() : null
-    if (nextExpiresAt) nextExpiresAt.setMinutes(nextExpiresAt.getMinutes() + nextRemaining)
-    const patch = {
-      remainingMinutes: nextRemaining,
-      expiresAt: nextExpiresAt ? formatDateTimeText(nextExpiresAt) : '-',
-      financeRows: buildManualFinanceRows({
-        status: direction === 'plus' ? '管理手动加' : '管理手动减',
-      }),
+      setActiveTgId(tgId)
+      const params = new URLSearchParams({ tgId, from: 'id' })
+      navigate(`/admin/account?${params.toString()}`, { replace: true })
+    } catch (err) {
+      setProfile(null)
+      setActiveTgId('')
+      setError(err?.message || '查询失败')
+    } finally {
+      setSearching(false)
     }
-    patchSelected(patch)
   }
 
-  const onManualUpgradeToVip = () => {
-    if (!selected) return
-    const patch = { userType: 'vip' }
-    if (!hasReadingVip(selected) && (selected.userType === 'normal' || selected.userType === 'author')) {
-      const bonusMinutes = getDefaultMinutesByBaseType(selected.userType)
-      if (bonusMinutes > 0) {
-        const expiresAt = new Date()
-        expiresAt.setMinutes(expiresAt.getMinutes() + bonusMinutes)
-        patch.remainingMinutes = bonusMinutes
-        patch.expiresAt = formatDateTimeText(expiresAt)
-      }
+  const onSearchKeyDown = (event) => {
+    if (event.key === 'Enter') onSearch()
+  }
+
+  const runAction = async (action, extra = {}) => {
+    if (!activeTgId || actionLoading) return
+    setActionLoading(action)
+    setError('')
+    try {
+      const next = await adminUserAction({
+        token: getToken(),
+        tgId: activeTgId,
+        action,
+        ...extra,
+      })
+      if (next) setProfile(next)
+      else await loadProfile(activeTgId)
+    } catch (err) {
+      setError(err?.message || '操作失败')
+    } finally {
+      setActionLoading('')
     }
-    patch.financeRows = buildManualFinanceRows({ status: 'VIP会员' })
-    patchSelected(patch)
   }
 
-  const onManualSwitchToNormal = () => {
-    if (!selected) return
-    patchSelected({
-      userType: 'normal',
-      remainingMinutes: 0,
-      expiresAt: '-',
-      financeRows: buildManualFinanceRows({ status: '普通会员' }),
-    })
-  }
-
-  const onManualSwitchToAuthor = () => {
-    if (!selected) return
-    const bonusMinutes = PURCHASE_MINUTES_MAP.author[1] || 300
-    const expiresAt = new Date()
-    expiresAt.setMinutes(expiresAt.getMinutes() + bonusMinutes)
-    const patch = {
-      userType: 'author',
-      remainingMinutes: bonusMinutes,
-      expiresAt: formatDateTimeText(expiresAt),
-      financeRows: buildManualFinanceRows({ status: '作者会员' }),
+  const runVipPurchase = async (planId) => {
+    const loadingKey = `vip_purchase:${planId}`
+    if (!activeTgId || actionLoading) return
+    setActionLoading(loadingKey)
+    setError('')
+    try {
+      const next = await adminUserVipPurchase({
+        token: getToken(),
+        tgId: activeTgId,
+        planId,
+      })
+      if (next) setProfile(next)
+      else await loadProfile(activeTgId)
+    } catch (err) {
+      setError(err?.message || 'VIP 内购失败，请稍后重试')
+    } finally {
+      setActionLoading('')
     }
-    patchSelected(patch)
   }
 
-  const purchaseVipByAmount = (amount) => {
-    if (!selected) return
-    const tier = selected.userType === 'author' ? 'author' : 'normal'
-    const addMinutes = PURCHASE_MINUTES_MAP[tier]?.[amount] || 0
-    if (!addMinutes) return
-    const nextRemaining = selected.remainingMinutes + addMinutes
-    const nextExpiresAt = new Date()
-    nextExpiresAt.setMinutes(nextExpiresAt.getMinutes() + nextRemaining)
-    patchSelected({
-      remainingMinutes: nextRemaining,
-      expiresAt: formatDateTimeText(nextExpiresAt),
-      financeRows: buildManualFinanceRows({ status: '管理手动加' }),
-    })
+  const toggleWhitelist = async () => {
+    if (!activeTgId || actionLoading) return
+    setActionLoading('whitelist')
+    setError('')
+    try {
+      const updated = await patchAdminUserFlags(activeTgId, { whitelist: !whitelist })
+      setWhitelist(updated ? updated.whitelist : !whitelist)
+    } catch (err) {
+      setError(err?.message || '白名单状态更新失败')
+    } finally {
+      setActionLoading('')
+    }
   }
 
-  const onQuery = () => {
-    setLinkRefreshFlash(true)
-    window.setTimeout(() => setLinkRefreshFlash(false), 140)
-    setFilters({
-      memberName: memberNameInput,
-      memberId: memberIdInput,
-      memberAccount: memberAccountInput,
-      banType: banTypeInput,
-      type: typeInput,
-    })
-    setSelectedId('')
-    setQueryTick((v) => v + 1)
-  }
-
-  const onReset = () => {
-    setMemberNameInput('')
-    setMemberIdInput('')
-    setMemberAccountInput('')
-    setBanTypeInput('all')
-    setTypeInput('all')
-    setFilters({
-      memberName: '',
-      memberId: '',
-      memberAccount: '',
-      banType: 'all',
-      type: 'all',
-    })
-    setSelectedId('')
-    setQueryTick((v) => v + 1)
-  }
+  const basic = profile?.basic
+  const vip = profile?.vip
+  const reading = profile?.reading
+  const vipPurchasePlans = useMemo(
+    () => pickVipPurchasePlans(vipPlansPayload, vip?.role === 'author' ? 'author' : 'normal'),
+    [vipPlansPayload, vip?.role],
+  )
+  const interaction = profile?.interaction
+  const orders = profile?.orders
+  const keyword = encodeURIComponent(activeTgId || basic?.nickname || '')
 
   return (
-    <section className="admin-panel">
-      {linkRefreshFlash ? <div className="admin-link-refresh-flash" /> : null}
-      <div className="admin-tools admin-tools-wrap admin-account-tools">
-        <label className="admin-account-type-filter">
-          会员名称
-          <input value={memberNameInput} onChange={(e) => setMemberNameInput(e.target.value)} />
-        </label>
-        <label className="admin-account-type-filter">
-          会员ID
-          <input value={memberIdInput} onChange={(e) => setMemberIdInput(e.target.value)} />
-        </label>
-        <label className="admin-account-type-filter">
-          会员账号
-          <input value={memberAccountInput} onChange={(e) => setMemberAccountInput(e.target.value)} />
-        </label>
-        <label className="admin-account-type-filter">
-          封禁类型
-          <select value={banTypeInput} onChange={(e) => setBanTypeInput(e.target.value)}>
-            <option value="all">全部</option>
-            <option value="normal">正常</option>
-            <option value="banned">封禁</option>
-          </select>
-        </label>
-        <label className="admin-account-type-filter">
-          用户类型
-          <select value={typeInput} onChange={(e) => setTypeInput(e.target.value)}>
-            <option value="all">全部</option>
-            <option value="normal">普通</option>
-            <option value="vip">VIP</option>
-            <option value="author">作者</option>
-          </select>
-        </label>
-        <button className="admin-btn admin-btn-primary" type="button" onClick={onQuery}>
-          查询
-        </button>
-        <button className="admin-btn" type="button" onClick={onReset}>
-          重置
-        </button>
-        <button
-          className="admin-btn admin-btn-primary"
-          type="button"
-          onClick={() => downloadCsv('账户资料.csv', toCsv(filteredRows))}
-        >
-          导出表格
-        </button>
+    <section className="admin-panel admin-account-profile">
+      <div className="admin-reading-mgmt-toolbar admin-account-profile-toolbar">
+        <div className="admin-reading-mgmt-filters admin-account-profile-search">
+          <label className="admin-reading-mgmt-field">
+            <span>名称</span>
+            <input
+              value={nicknameInput}
+              placeholder="昵称 / 显示名"
+              onChange={(e) => setNicknameInput(e.target.value)}
+              onKeyDown={onSearchKeyDown}
+            />
+          </label>
+          <label className="admin-reading-mgmt-field">
+            <span>用户名</span>
+            <input
+              value={usernameInput}
+              placeholder="@username"
+              onChange={(e) => setUsernameInput(e.target.value)}
+              onKeyDown={onSearchKeyDown}
+            />
+          </label>
+          <label className="admin-reading-mgmt-field">
+            <span>用户ID</span>
+            <input
+              value={userIdInput}
+              placeholder="Telegram 用户 ID"
+              onChange={(e) => setUserIdInput(e.target.value.replace(/[^\d]/g, ''))}
+              onKeyDown={onSearchKeyDown}
+            />
+          </label>
+        </div>
+        <div className="admin-reading-mgmt-actions">
+          <button
+            className="admin-btn admin-btn-primary"
+            type="button"
+            onClick={onSearch}
+            disabled={searching}
+          >
+            {searching ? '查询中…' : '查询资料'}
+          </button>
+          <button
+            className="admin-btn"
+            type="button"
+            onClick={() => activeTgId && loadProfile(activeTgId)}
+            disabled={!activeTgId || loading}
+          >
+            {loading ? '刷新中…' : '刷新'}
+          </button>
+          <Link className="admin-btn admin-account-profile-users-btn" to="/admin/users">
+            用户列表
+          </Link>
+        </div>
       </div>
 
-      {error && !/not found/i.test(error) ? <p className="admin-error">{error}</p> : null}
+      {error ? <p className="admin-error admin-account-profile-error">{error}</p> : null}
 
-      {selected ? (
-        <>
-          <div className="admin-account-block admin-account-block-plain">
+      {!activeTgId && !searching ? (
+        <p className="admin-account-profile-hint">可按名称、用户名或用户ID查询，至少填写一项</p>
+      ) : null}
+
+      {activeTgId && loading && !profile ? (
+        <p className="admin-account-profile-hint">正在加载账户详情…</p>
+      ) : null}
+
+      {activeTgId && !loading && !profile && !error ? (
+        <p className="admin-account-profile-hint">未找到该用户资料</p>
+      ) : null}
+
+      {profile ? (
+        <div className="admin-account-profile-detail">
+          <ProfileSection title="基础信息">
+            <ProfileGrid
+              rows={[
+                {
+                  label: '头像',
+                  wide: true,
+                  value: (
+                    <img
+                      className="admin-account-profile-grid-avatar"
+                      src={basic.avatar ? resolveApiAssetUrl(basic.avatar) : '/admin-cartoon-avatar.svg'}
+                      alt=""
+                    />
+                  ),
+                },
+                { label: '昵称', value: basic.nickname },
+                { label: 'Telegram ID', value: basic.telegramId },
+                { label: 'Username', value: basic.username },
+                { label: '注册时间', value: basic.registeredAt },
+                { label: '最后在线时间', value: basic.lastOnlineAt },
+                { label: '最后登录设备', value: basic.lastDevice },
+                { label: '当前IP地址', value: basic.currentIp },
+                { label: 'IP归属地', value: basic.ipLocation },
+                {
+                  label: '账户状态',
+                  value: (
+                    <StatusBadge
+                      status={basic.accountStatus}
+                      variant={basic.isBanned ? 'banned' : 'normal'}
+                    />
+                  ),
+                },
+                { label: '白名单', value: whitelist ? '已加入' : '未加入' },
+              ]}
+            />
+          </ProfileSection>
+
+          <ProfileSection title="VIP资料">
+            <ProfileGrid
+              rows={[
+                { label: '当前会员状态', value: vip.membershipStatus },
+                { label: '会员类型', value: vip.membershipType },
+                { label: '当前套餐', value: vip.packageName },
+                { label: '套餐价格', value: vip.packagePrice },
+                { label: '开始时间', value: vip.startAt },
+                { label: '到期时间', value: vip.expireAt },
+                { label: '剩余阅读时长', value: vip.remainingLabel },
+                { label: '累计购买次数', value: vip.purchaseCount },
+                { label: '累计消费金额', value: formatMoney(vip.totalSpendUsd) },
+              ]}
+            />
+          </ProfileSection>
+
+          <ProfileSection title="阅读数据">
+            <ProfileGrid
+              rows={[
+                { label: '已阅读小说数量', value: reading.novelCount },
+                { label: '已阅读章节数量', value: reading.chapterCount },
+                { label: '累计阅读时长', value: reading.totalDurationLabel },
+                { label: '最近阅读小说', value: reading.lastNovel },
+                { label: '最近阅读章节', value: reading.lastChapter },
+                { label: '连续阅读天数', value: reading.streakDays },
+              ]}
+            />
+          </ProfileSection>
+
+          <ProfileSection title="互动数据">
+            <ProfileGrid
+              rows={[
+                { label: '评论数量', value: interaction.commentCount },
+                { label: '回复数量', value: interaction.replyCount },
+                { label: '收藏数量', value: interaction.favoriteCount },
+                { label: '点赞数量', value: interaction.likeCount },
+                { label: '举报数量', value: interaction.reportCount },
+              ]}
+            />
+          </ProfileSection>
+
+          <ProfileSection title="订单资料">
+            <ProfileGrid
+              rows={[
+                { label: '订单总数', value: orders.totalCount },
+                { label: '累计消费金额', value: formatMoney(orders.totalSpendUsd) },
+                { label: '最近充值时间', value: orders.latestRechargeAt },
+                { label: '最近充值金额', value: formatMoney(orders.latestRechargeAmount) },
+                { label: '支付方式', value: orders.latestPaymentMethod },
+                { label: '最近订单编号', value: orders.latestOrderNo },
+              ]}
+            />
+          </ProfileSection>
+
+          <ProfileSection title="登录记录">
             <div className="admin-table-wrap">
-              <table className="admin-table">
+              <table className="admin-table admin-account-profile-table">
                 <thead>
                   <tr>
-                    <th>头像</th>
-                    <th>昵称</th>
-                    <th>用户名</th>
-                    <th>ID</th>
-                    <th>用户类型</th>
-                    <th>剩余时长</th>
-                    <th>过期时间</th>
-                    <th>封禁类型</th>
-                    <th>注册IP/登录IP</th>
-                    <th>操作</th>
+                    <th>登录时间</th>
+                    <th>登录设备</th>
+                    <th>操作系统</th>
+                    <th>IP地址</th>
+                    <th>IP归属地</th>
+                    <th>登录方式</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => (
-                    <tr key={`overview-${row.id}`}>
-                      <td>
-                        <img
-                          className="admin-user-avatar-cell"
-                          src={row.avatar || '/admin-cartoon-avatar.svg'}
-                          alt="avatar"
-                        />
-                      </td>
-                      <td>{row.nickname}</td>
-                      <td>@{row.username}</td>
-                      <td>{row.tgId}</td>
-                      <td>{TYPE_LABEL[row.userType]}</td>
-                      <td>{hasReadingVip(row) ? `${row.remainingMinutes} 分钟` : '无'}</td>
-                      <td>{hasReadingVip(row) ? row.expiresAt : '无'}</td>
-                      <td>{row.banType === 'banned' ? '封禁' : '正常'}</td>
-                      <td>
-                        注册：{row.registerIp}
-                        <br />
-                        登录：{row.loginIp}
-                      </td>
-                      <td>
-                        <button
-                          className="admin-btn"
-                          type="button"
-                          onClick={() => setSelectedId(row.id)}
-                        >
-                          查看
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="admin-account-block">
-            <h3>1. 基础资料</h3>
-            <div className="admin-account-grid">
-              <p>头像</p>
-              <div>
-                <img
-                  className="admin-user-avatar-cell"
-                  src={selected.avatar || '/admin-cartoon-avatar.svg'}
-                  alt="avatar"
-                />
-              </div>
-              <p>昵称</p>
-              <div>{selected.nickname}</div>
-              <p>用户名</p>
-              <div>@{selected.username}</div>
-              <p>ID</p>
-              <div>{selected.tgId}</div>
-              <p>用户类型</p>
-              <div className="admin-account-type-switch">
-                <button className="admin-btn" type="button" onClick={onManualSwitchToNormal}>
-                  普通
-                </button>
-                <button className="admin-btn" type="button" onClick={onManualUpgradeToVip}>
-                  VIP
-                </button>
-                <button className="admin-btn" type="button" onClick={onManualSwitchToAuthor}>
-                  作者
-                </button>
-                <span className="admin-account-type-tag">当前：{TYPE_LABEL[selected.userType]}</span>
-              </div>
-              <p>注册时间</p>
-              <div>{selected.registeredAt}</div>
-              <p>注册IP/登录IP</p>
-              <div>
-                注册：{selected.registerIp} / 登录：{selected.loginIp}
-              </div>
-            </div>
-          </div>
-
-          <div className="admin-account-block">
-            <h3>2. 资产/时长管理</h3>
-            <div className="admin-account-grid">
-              <p>剩余时长</p>
-              <div>{hasReadingVip(selected) ? `${selected.remainingMinutes} 分钟` : '无'}</div>
-              <p>过期时间</p>
-              <div>{hasReadingVip(selected) ? selected.expiresAt : '无'}</div>
-              <p>手动校准</p>
-              <div className="admin-account-adjust-row">
-                <input
-                  value={adjustInput}
-                  onChange={(e) => setAdjustInput(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
-                />
-                <button className="admin-btn admin-btn-primary" type="button" onClick={() => adjustMinutes('plus')}>
-                  +
-                </button>
-                <button className="admin-btn" type="button" onClick={() => adjustMinutes('minus')}>
-                  -
-                </button>
-              </div>
-              <p>快捷充值</p>
-              <div className="admin-account-type-switch">
-                <button className="admin-btn" type="button" onClick={() => purchaseVipByAmount(1)}>
-                  $1
-                </button>
-                <button className="admin-btn" type="button" onClick={() => purchaseVipByAmount(3)}>
-                  $3
-                </button>
-                <button className="admin-btn" type="button" onClick={() => purchaseVipByAmount(5)}>
-                  $5
-                </button>
-                <span className="admin-account-type-tag">
-                  {selected.userType === 'author' ? '作者购买规则' : '普通购买规则'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="admin-account-block">
-            <h3>3. 封禁类型</h3>
-            <div className="admin-account-ban-row">
-              <button
-                className={`admin-btn ${selected.banType === 'normal' ? 'admin-ban-normal-active' : ''}`}
-                type="button"
-                onClick={() => patchSelected({ banType: 'normal' })}
-              >
-                正常
-              </button>
-              <button
-                className={`admin-btn ${selected.banType === 'banned' ? 'admin-ban-banned-active' : ''}`}
-                type="button"
-                onClick={() => patchSelected({ banType: 'banned' })}
-              >
-                封禁
-              </button>
-            </div>
-          </div>
-
-          <div className="admin-account-block">
-            <h3>4. 财务明细</h3>
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>充值金额</th>
-                    <th>支付方式</th>
-                    <th>状态</th>
-                    <th>时间日期</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selected.financeRows.length ? (
-                    selected.financeRows.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.amount}</td>
-                        <td>{item.payMethod || item.abaNo || '-'}</td>
-                        <td>{item.status}</td>
-                        <td>{item.time || '-'}</td>
+                  {profile.loginRecords?.length ? (
+                    profile.loginRecords.map((row, idx) => (
+                      <tr key={`${row.at}-${idx}`}>
+                        <td>{row.atLabel}</td>
+                        <td>{row.device}</td>
+                        <td>{row.os}</td>
+                        <td>{row.ip}</td>
+                        <td>{row.ipLocation}</td>
+                        <td>{row.loginMethod}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={4} className="admin-table-empty">
-                        暂无记录
+                      <td colSpan={6} className="admin-table-empty">
+                        暂无登录记录
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
-          </div>
-        </>
-      ) : (
-        <div className="admin-account-block admin-account-block-plain">
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>头像</th>
-                  <th>昵称</th>
-                  <th>用户名</th>
-                  <th>ID</th>
-                  <th>用户类型</th>
-                  <th>剩余时长</th>
-                  <th>过期时间</th>
-                  <th>封禁类型</th>
-                  <th>注册IP/登录IP</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={10} className="admin-table-empty">
-                    {loading ? '加载中...' : '暂无记录'}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          </ProfileSection>
+
+          <ProfileSection title="管理员操作">
+            <div className="admin-account-profile-actions">
+              <div className="admin-account-profile-vip-purchase-group">
+                {vipPurchasePlans.map((plan) => {
+                  const planId = String(plan.planId || '').trim()
+                  const loadingKey = `vip_purchase:${planId}`
+                  return (
+                    <button
+                      key={planId}
+                      className="admin-btn admin-btn-primary"
+                      type="button"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => runVipPurchase(planId)}
+                    >
+                      {actionLoading === loadingKey ? '处理中…' : vipPurchaseButtonLabel(plan)}
+                    </button>
+                  )
+                })}
+              </div>
+              <button
+                className="admin-btn"
+                type="button"
+                disabled={Boolean(actionLoading)}
+                onClick={() => runAction('deduct_vip')}
+              >
+                {actionLoading === 'deduct_vip' ? '处理中…' : '扣除VIP'}
+              </button>
+              {basic.isBanned ? (
+                <button
+                  className="admin-btn admin-btn-primary"
+                  type="button"
+                  disabled={Boolean(actionLoading)}
+                  onClick={() => runAction('unban')}
+                >
+                  {actionLoading === 'unban' ? '处理中…' : '解除封禁'}
+                </button>
+              ) : (
+                <button
+                  className="admin-btn"
+                  type="button"
+                  disabled={Boolean(actionLoading)}
+                  onClick={() => runAction('ban')}
+                >
+                  {actionLoading === 'ban' ? '处理中…' : '封禁用户'}
+                </button>
+              )}
+              <button
+                className={`admin-btn ${whitelist ? 'admin-btn-primary' : ''}`}
+                type="button"
+                disabled={Boolean(actionLoading)}
+                onClick={toggleWhitelist}
+              >
+                {actionLoading === 'whitelist'
+                  ? '处理中…'
+                  : whitelist
+                    ? '移出白名单'
+                    : '加入白名单'}
+              </button>
+              <Link className="admin-btn" to={`/admin/orders?keyword=${keyword}`}>
+                查看订单
+              </Link>
+              <Link className="admin-btn" to={`/admin/reports?keyword=${keyword}`}>
+                查看评论
+              </Link>
+              <Link className="admin-btn" to={`/admin/reports?keyword=${keyword}`}>
+                查看收藏
+              </Link>
+              <Link className="admin-btn" to={`/admin/lists?keyword=${keyword}`}>
+                查看阅读历史
+              </Link>
+              <Link className="admin-btn" to={`/admin/reports?keyword=${keyword}`}>
+                查看举报记录
+              </Link>
+            </div>
+          </ProfileSection>
         </div>
-      )}
+      ) : null}
     </section>
   )
 }
-

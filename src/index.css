@@ -1426,6 +1426,14 @@ body {
   align-items: center;
 }
 
+.admin-account-profile-vip-purchase-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
 .admin-ban-normal-active {
   background: #1fbe62;
   color: #fff;
@@ -3026,6 +3034,15 @@ body {
   color: var(--adm-text-muted, #8b9cc7);
 }
 
+a.admin-reports-mgmt-user-sub {
+  text-decoration: none;
+}
+
+a.admin-reports-mgmt-user-sub:hover {
+  color: #c4d4ff;
+  text-decoration: underline;
+}
+
 .admin-reports-mgmt-novel,
 .admin-reports-mgmt-chapter {
   max-width: 180px;
@@ -3149,20 +3166,96 @@ body {
 }
 
 .admin-orders-mgmt-toolbar {
+  flex-wrap: nowrap;
   align-items: flex-end;
+  gap: 10px;
+  overflow-x: auto;
+}
+
+.admin-orders-mgmt-toolbar .admin-reading-mgmt-actions {
+  flex-shrink: 0;
 }
 
 .admin-orders-mgmt-filters {
-  display: grid;
-  grid-template-columns:
-    minmax(130px, 0.8fr)
-    minmax(130px, 0.8fr)
-    minmax(150px, 0.9fr)
-    minmax(150px, 0.9fr)
-    minmax(220px, 1.4fr);
-  gap: 10px 12px;
+  display: flex;
+  flex-wrap: nowrap;
   flex: 1;
-  min-width: min(100%, 980px);
+  min-width: 0;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.admin-orders-mgmt-filters .admin-reading-mgmt-field {
+  min-width: 0;
+}
+
+.admin-orders-mgmt-field--status {
+  flex: 0 0 96px;
+}
+
+.admin-orders-mgmt-field--pay {
+  flex: 0 0 108px;
+}
+
+.admin-orders-mgmt-field--date-field {
+  flex: 0 0 108px;
+}
+
+.admin-orders-mgmt-field--date {
+  flex: 0 0 132px;
+}
+
+.admin-orders-mgmt-field--search {
+  flex: 1 1 180px;
+  min-width: 160px;
+}
+
+.admin-orders-mgmt-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-orders-mgmt-summary-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--adm-border, rgba(139, 156, 199, 0.22));
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.admin-orders-mgmt-summary-card strong {
+  font-size: 18px;
+  color: #e2e8f0;
+}
+
+.admin-orders-mgmt-summary-card.is-paid strong {
+  color: #86efac;
+}
+
+.admin-orders-mgmt-summary-card.is-vip-inapp strong {
+  color: #93c5fd;
+}
+
+.admin-orders-mgmt-summary-card.is-refunded strong {
+  color: #fca5a5;
+}
+
+.admin-orders-mgmt-summary-label {
+  font-size: 12px;
+  color: var(--adm-text-muted, #8b9cc7);
+}
+
+.admin-orders-mgmt-summary-wide {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--adm-border, rgba(139, 156, 199, 0.22));
+  font-size: 13px;
+  color: #cbd5e1;
 }
 
 .admin-orders-mgmt-table th {
@@ -3298,20 +3391,25 @@ body {
 }
 
 @media (max-width: 1180px) {
-  .admin-orders-mgmt-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .admin-orders-mgmt-summary {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
   }
 
-  .admin-orders-mgmt-field--search {
-    grid-column: 1 / -1;
+  .admin-orders-mgmt-summary-card {
+    padding: 8px 6px;
+  }
+
+  .admin-orders-mgmt-summary-card strong {
+    font-size: 14px;
+  }
+
+  .admin-orders-mgmt-summary-label {
+    font-size: 11px;
   }
 }
 
 @media (max-width: 720px) {
-  .admin-orders-mgmt-filters {
-    grid-template-columns: 1fr;
-  }
-
   .admin-order-detail-meta {
     grid-template-columns: 1fr;
   }
@@ -3412,11 +3510,16 @@ body {
   color: var(--adm-text-muted, #8b9cc7);
 }
 
+.admin-users-mgmt-vip.is-vip,
 .admin-users-mgmt-vip.is-yes {
   background: rgba(245, 158, 11, 0.14);
   border-color: rgba(245, 158, 11, 0.35);
   color: #fcd34d;
   font-weight: 600;
+}
+
+.admin-users-mgmt-vip.is-normal {
+  color: var(--adm-text-muted, #8b9cc7);
 }
 
 .admin-users-mgmt-status {
@@ -3445,6 +3548,12 @@ body {
   background: rgba(59, 130, 246, 0.12);
   border-color: rgba(59, 130, 246, 0.35);
   color: #93c5fd;
+}
+
+.admin-users-mgmt-status.is-offline {
+  background: rgba(100, 116, 139, 0.12);
+  border-color: rgba(100, 116, 139, 0.35);
+  color: #94a3b8;
 }
 
 .admin-users-mgmt-status.is-banned {
@@ -5447,6 +5556,12 @@ body:has(.admin-theme-dark) {
   color: #fff;
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.admin-dash-avatar--img {
+  display: block;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .admin-dash-pill {

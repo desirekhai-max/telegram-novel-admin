@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { clearAuth, loginAdmin, saveAuth, verifyLegacyTokenInSession } from '../lib/adminAuth.js'
+import { clearAuth, fetchAdminSession, getToken, loginAdmin, saveAuth, verifyLegacyTokenInSession } from '../lib/adminAuth.js'
+import { API_ERRORS, humanizeApiError } from '../lib/apiErrors.js'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -11,12 +12,29 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
 
+  useEffect(() => {
+    document.title = '登录'
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const token = getToken()
+    if (!token) return undefined
+    fetchAdminSession(token).then((session) => {
+      if (!active || !session.ok) return
+      navigate('/admin/dashboard', { replace: true })
+    })
+    return () => {
+      active = false
+    }
+  }, [navigate])
+
   const onSubmit = async (e) => {
     e.preventDefault()
     setError('')
 
     if (!username.trim() || !password.trim() || !otp.trim()) {
-      setError('请输入账号、密码和 OTP')
+      setError(API_ERRORS.otpRequired)
       return
     }
 
@@ -30,7 +48,7 @@ export default function LoginPage() {
 
       if (!authData.token || !authData.legacyToken) {
         clearAuth()
-        setError('登录失败：未同时获取 admin_token 与 admin_legacy_token')
+        setError(API_ERRORS.loginTokensMissing)
         return
       }
 
@@ -40,14 +58,14 @@ export default function LoginPage() {
         verifyLegacyTokenInSession()
       } catch (verifyErr) {
         clearAuth()
-        setError(verifyErr?.message || '登录未完成，请重新登录')
+        setError(humanizeApiError(verifyErr?.message, API_ERRORS.loginIncomplete))
         return
       }
 
       navigate('/admin/dashboard', { replace: true })
     } catch (err) {
       clearAuth()
-      setError(err?.message || '网络异常，请稍后重试')
+      setError(humanizeApiError(err?.message, '网络异常，请稍后重试'))
     } finally {
       setLoading(false)
     }
@@ -58,7 +76,7 @@ export default function LoginPage() {
       <div className="admin-login-card">
         <div className="admin-login-heading">
           <h1 className="admin-login-title">系统后台登录</h1>
-          <p className="admin-login-sub">请输入账号、密码与 Google OTP（须同时通过主站与 Legacy 登录）</p>
+          <p className="admin-login-sub">请输入账号、密码与 Google OTP</p>
         </div>
 
         <form className="admin-login-form" onSubmit={onSubmit}>

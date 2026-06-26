@@ -1,20 +1,70 @@
-const API_BASE =
-  import.meta.env.VITE_API_BASE ??
-  'https://telegram-novel-app-production-7f1e.up.railway.app'
+import { apiUrl } from './apiBase.js'
+import { API_ERRORS, humanizeApiError, isLegacyUnauthorizedMessage } from './apiErrors.js'
 const TOKEN_KEY = 'admin_token'
 const LEGACY_TOKEN_KEY = 'admin_legacy_token'
 const USERNAME_KEY = 'admin_username'
+
+function authStore() {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function readAuthItem(key) {
+  const store = authStore()
+  if (!store) return ''
+  let value = store.getItem(key) || ''
+  if (!value) {
+    try {
+      value = sessionStorage.getItem(key) || ''
+      if (value) {
+        store.setItem(key, value)
+        sessionStorage.removeItem(key)
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return value
+}
+
+function writeAuthItem(key, value) {
+  const store = authStore()
+  if (!store) return
+  if (value) {
+    store.setItem(key, value)
+  } else {
+    store.removeItem(key)
+  }
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
+
+function removeAuthItem(key) {
+  const store = authStore()
+  if (store) store.removeItem(key)
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
 
 function parseJsonSafe(response) {
   return response.json().catch(() => ({}))
 }
 
 export function getToken() {
-  return sessionStorage.getItem(TOKEN_KEY) || ''
+  return readAuthItem(TOKEN_KEY)
 }
 
 export function getLegacyToken() {
-  return sessionStorage.getItem(LEGACY_TOKEN_KEY) || ''
+  return readAuthItem(LEGACY_TOKEN_KEY)
 }
 
 export function hasLegacyToken() {
@@ -22,7 +72,7 @@ export function hasLegacyToken() {
 }
 
 export function getStoredUsername() {
-  return sessionStorage.getItem(USERNAME_KEY) || ''
+  return readAuthItem(USERNAME_KEY)
 }
 
 /**
@@ -32,36 +82,80 @@ export function getStoredUsername() {
  */
 export function saveAuth(token, username, legacyToken) {
   if (token) {
-    sessionStorage.setItem(TOKEN_KEY, token)
+    writeAuthItem(TOKEN_KEY, token)
   }
   if (legacyToken !== undefined) {
     if (legacyToken) {
-      sessionStorage.setItem(LEGACY_TOKEN_KEY, legacyToken)
+      writeAuthItem(LEGACY_TOKEN_KEY, legacyToken)
     } else {
-      sessionStorage.removeItem(LEGACY_TOKEN_KEY)
+      removeAuthItem(LEGACY_TOKEN_KEY)
     }
   }
   if (username) {
-    sessionStorage.setItem(USERNAME_KEY, username)
+    writeAuthItem(USERNAME_KEY, username)
   }
 }
 
 export function clearAuth() {
-  sessionStorage.removeItem(TOKEN_KEY)
-  sessionStorage.removeItem(LEGACY_TOKEN_KEY)
-  sessionStorage.removeItem(USERNAME_KEY)
+  removeAuthItem(TOKEN_KEY)
+  removeAuthItem(LEGACY_TOKEN_KEY)
+  removeAuthItem(USERNAME_KEY)
+}
+
+export function clearLegacyToken() {
+  removeAuthItem(LEGACY_TOKEN_KEY)
+}
+
+export function isLegacyUnauthorizedError(error) {
+  return isLegacyUnauthorizedMessage(error?.message || error)
+}
+
+async function fetchLegacySession(token) {
+  const response = await fetch(apiUrl('/api/admin-legacy/session'), {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  })
+  const data = await parseJsonSafe(response)
+  return response.ok && data?.ok !== false
+}
+
+/** Railway 重启后 Legacy 内存会话失效时，用仍有效的 admin_token 续签 */
+export async function refreshLegacyTokenFromAdminSession() {
+  const adminToken = getToken()
+  if (!adminToken) return false
+
+  const legacyToken = getLegacyToken()
+  if (legacyToken) {
+    const alive = await fetchLegacySession(legacyToken)
+    if (alive) return true
+    clearLegacyToken()
+  }
+
+  try {
+    const response = await fetch(apiUrl('/api/admin-legacy/session/refresh'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    })
+    const data = await parseJsonSafe(response)
+    if (!response.ok || !data?.ok || !data?.token) return false
+    saveAuth(adminToken, getStoredUsername(), data.token)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function verifyLegacyTokenInSession() {
-  const legacy = sessionStorage.getItem(LEGACY_TOKEN_KEY)
+  const legacy = getLegacyToken()
   if (!legacy) {
-    throw new Error('登录未完成：sessionStorage 中未找到 admin_legacy_token，请重新登录')
+    throw new Error('登录未完成：未找到 admin_legacy_token，请重新登录')
   }
   return legacy
 }
 
 async function loginLegacyAdmin({ username, password, otp }) {
-  const response = await fetch(`${API_BASE}/api/admin-legacy/login`, {
+  const response = await fetch(apiUrl('/api/admin-legacy/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password, otp }),
@@ -70,7 +164,7 @@ async function loginLegacyAdmin({ username, password, otp }) {
   const data = await parseJsonSafe(response)
 
   if (!response.ok || !data?.ok || !data?.token) {
-    throw new Error(data?.error || 'Legacy 管理员登录失败')
+    throw new Error(humanizeApiError(data?.error, 'Legacy 管理员登录失败'))
   }
 
   return data.token
@@ -85,18 +179,18 @@ export async function loginAdmin({ username, password, otp }) {
 
   let adminResponse
   try {
-    adminResponse = await fetch(`${API_BASE}/api/admin/login`, {
+    adminResponse = await fetch(apiUrl('/api/admin/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials),
     })
   } catch {
-    throw new Error('无法连接后端服务，请检查网络或确认 API 服务已启动')
+    throw new Error(API_ERRORS.network)
   }
 
   const data = await parseJsonSafe(adminResponse)
   if (!adminResponse.ok || !data?.token) {
-    throw new Error(data?.error || '账号、密码或动态码错误')
+    throw new Error(humanizeApiError(data?.error, API_ERRORS.invalidCredentials))
   }
 
   let legacyToken = ''
@@ -105,16 +199,17 @@ export async function loginAdmin({ username, password, otp }) {
     console.log('Legacy Login Success')
   } catch (error) {
     console.log('Legacy Login Failed', error?.message || error)
+    const detail = humanizeApiError(error?.message, API_ERRORS.legacyLoginFailed)
     throw new Error(
-      error?.message
-        ? `Legacy 登录失败：${error.message}。请确认账号、密码、OTP 正确，且具备 Legacy 权限后重试。`
-        : 'Legacy 登录失败，请确认账号具备 Legacy 权限后重试。',
+      detail.startsWith('Legacy')
+        ? detail
+        : `Legacy 登录失败：${detail}。请确认账号、密码、OTP 正确，且具备 Legacy 权限后重试。`,
     )
   }
 
   if (!legacyToken) {
     console.log('Legacy Login Failed', 'empty token')
-    throw new Error('Legacy 登录失败：未返回有效 Token，请稍后重试。')
+    throw new Error(API_ERRORS.legacyEmptyToken)
   }
 
   return {
@@ -129,7 +224,7 @@ export async function fetchAdminSession(token) {
     return { ok: false }
   }
 
-  const response = await fetch(`${API_BASE}/api/admin/session`, {
+  const response = await fetch(apiUrl('/api/admin/session'), {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -152,7 +247,7 @@ export async function logoutAdmin() {
   const requests = []
   if (token) {
     requests.push(
-      fetch(`${API_BASE}/api/admin/logout`, {
+      fetch(apiUrl('/api/admin/logout'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => {}),
@@ -160,7 +255,7 @@ export async function logoutAdmin() {
   }
   if (legacyToken) {
     requests.push(
-      fetch(`${API_BASE}/api/admin-legacy/logout`, {
+      fetch(apiUrl('/api/admin-legacy/logout'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${legacyToken}` },
       }).catch(() => {}),

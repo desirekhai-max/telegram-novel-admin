@@ -4,17 +4,12 @@ import { resolveApiAssetUrl } from '../lib/apiBase.js'
 import {
   fetchAdminUsers,
   getApiOriginLabel,
-  normalizeAdminUserRow,
   patchAdminUserFlags,
+  resolveUserPresenceStatus,
 } from '../lib/usersApi.js'
 
 const PAGE_SIZE = 50
 const AUTO_REFRESH_MS = 30 * 1000
-const TYPE_LABEL = {
-  normal: '普通',
-  vip: 'VIP',
-  author: '作者',
-}
 
 const EMPTY_FILTERS = {
   nickname: '',
@@ -63,7 +58,19 @@ function shouldShowError(message) {
   return text && text !== 'not found'
 }
 
-export default function UserManagementPage() {  const [inputFilters, setInputFilters] = useState(createDefaultInputFilters)
+/** 列表展示用：无头像且无昵称且无用户名时不显示（不影响服务端数据） */
+function isRenderableUserRow(row) {
+  const avatar = String(row?.avatar || '').trim()
+  const nickname = String(row?.nickname || '').trim()
+  const username = String(row?.username || '').trim().replace(/^@/, '')
+  if (avatar) return true
+  if (username) return true
+  if (nickname && nickname !== '—') return true
+  return false
+}
+
+export default function UserManagementPage() {
+  const [inputFilters, setInputFilters] = useState(createDefaultInputFilters)
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -115,7 +122,7 @@ export default function UserManagementPage() {  const [inputFilters, setInputFil
     const userType = appliedFilters.userType.trim().toLowerCase()
     const vipOnly = appliedFilters.vipOnly === 'yes'
 
-    return rows.filter((row) => {
+    return rows.filter(isRenderableUserRow).filter((row) => {
       if (userType && row.userType !== userType) return false
       if (vipOnly && !row.vipActive) return false
       if (nickname && !String(row.nickname || '').toLowerCase().includes(nickname)) return false
@@ -164,20 +171,22 @@ export default function UserManagementPage() {  const [inputFilters, setInputFil
     try {
       const updated = await patchAdminUserFlags(row.id, { isBanned: !row.isBanned })
       setRows((prev) =>
-        prev.map((item) =>
-          item.id === row.id
-            ? updated || {
-                ...item,
-                isBanned: !row.isBanned,
-                statusLabel: !row.isBanned
-                  ? '已封禁'
-                  : item.vipActive
-                    ? 'VIP'
-                    : TYPE_LABEL[item.userType] || '普通',
-              }
-            : item,
-        ),
-      )    } catch (err) {
+        prev.map((item) => {
+          if (item.id !== row.id) return item
+          const next = updated || {
+            ...item,
+            isBanned: !row.isBanned,
+          }
+          const presence = resolveUserPresenceStatus(next)
+          return {
+            ...next,
+            presenceLabel: presence.label,
+            presenceVariant: presence.variant,
+            statusLabel: presence.label,
+          }
+        }),
+      )
+    } catch (err) {
       setError(err?.message || '封禁状态更新失败')
     } finally {
       setSubmittingId('')
@@ -260,7 +269,7 @@ export default function UserManagementPage() {  const [inputFilters, setInputFil
             </select>
           </label>
           <label className="admin-reading-mgmt-field admin-users-mgmt-field--vip">
-            <span>VIP</span>
+            <span>会员</span>
             <select
               value={inputFilters.vipOnly}
               onChange={(e) => setInputFilters((prev) => ({ ...prev, vipOnly: e.target.value }))}
@@ -293,7 +302,7 @@ export default function UserManagementPage() {  const [inputFilters, setInputFil
                 <th>名称</th>
                 <th>用户名</th>
                 <th>用户ID</th>
-                <th>VIP</th>
+                <th>会员</th>
                 <th>套餐</th>
                 <th>到期时间</th>
                 <th>消费</th>
@@ -310,13 +319,15 @@ export default function UserManagementPage() {  const [inputFilters, setInputFil
                 pagedRows.map((row) => {
                   const banBusy = submittingId === `${row.id}:ban`
                   const whitelistBusy = submittingId === `${row.id}:whitelist`
+                  const presence = resolveUserPresenceStatus(row)
                   return (
                     <tr key={row.id} className="admin-users-mgmt-row">
                       <td>
                         <Link className="admin-users-mgmt-row-link" to={`/admin/account?tgId=${encodeURIComponent(row.tgId)}`}>
                           {row.avatar ? (
                             <img className="admin-users-mgmt-avatar" src={resolveApiAssetUrl(row.avatar)} alt="" />
-                          ) : (                            <span className="admin-users-mgmt-avatar-empty">无</span>
+                          ) : (
+                            <span className="admin-users-mgmt-avatar-empty">无</span>
                           )}
                         </Link>
                       </td>
@@ -345,27 +356,23 @@ export default function UserManagementPage() {  const [inputFilters, setInputFil
                         </Link>
                       </td>
                       <td>
-                        <span className={`admin-users-mgmt-vip ${row.vipActive ? 'is-yes' : 'is-no'}`}>
-                          {row.vipActive ? '是' : '否'}
+                        <span className={`admin-users-mgmt-vip ${row.vipActive ? 'is-vip' : 'is-normal'}`}>
+                          {row.vipActive ? 'VIP' : '普通'}
                         </span>
                       </td>
-                      <td className="admin-users-mgmt-package">{row.packageName}</td>
-                      <td className="admin-novel-mgmt-time">{row.vipExpiresAt}</td>
+                      <td className="admin-users-mgmt-package">
+                        {row.vipActive ? row.packageName || '—' : '—'}
+                      </td>
+                      <td className="admin-novel-mgmt-time">
+                        {row.vipActive ? row.vipExpiresAt || '—' : '—'}
+                      </td>
                       <td className="admin-novel-mgmt-num">{formatSpend(row.spendUsd)}</td>
                       <td className="admin-novel-mgmt-num">{formatCount(row.commentCount)}</td>
                       <td className="admin-novel-mgmt-num">{formatCount(row.favoriteCount)}</td>
                       <td className="admin-novel-mgmt-num">{formatCount(row.readCount)}</td>
                       <td>
-                        <span
-                          className={[
-                            'admin-users-mgmt-status',
-                            row.isBanned ? 'is-banned' : '',
-                            row.isOnline ? 'is-online' : '',
-                            row.userType === 'author' ? 'is-author' : '',
-                            row.vipActive ? 'is-vip' : '',
-                          ].join(' ')}
-                        >
-                          {row.statusLabel}
+                        <span className={`admin-users-mgmt-status is-${presence.variant}`}>
+                          {presence.label}
                         </span>
                       </td>
                       <td>

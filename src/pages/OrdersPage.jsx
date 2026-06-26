@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   fetchAdminOrderDetail,
+  fetchAdminOrdersDashboardMetrics,
   getApiOriginLabel,
   refundAdminOrderById,
+  resolveOrderDisplayStatus,
+  resolveOrderDisplayTime,
   searchAdminOrdersList,
 } from '../lib/ordersApi.js'
 
@@ -31,20 +34,50 @@ function createDefaultInputFilters() {
 }
 
 function formatDateTime(value) {
-  if (!value) return '—'
-  const ms = Number(value)
-  if (Number.isFinite(ms) && ms > 0) {
-    return new Date(ms).toLocaleString('zh-CN', { hour12: false })
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return resolveOrderDisplayTime({ paid_at: value, created_at: value, time_at: value }, 'paid')
+}
+
+function formatUsd(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '—'
+  return `$${n.toFixed(2)}`
 }
 
 function formatAmount(amount) {
-  const n = Number(amount)
-  if (!Number.isFinite(n)) return '—'
-  return `$${n.toFixed(2)}`
+  return formatUsd(amount)
+}
+
+function OrdersSummaryBar({ summary }) {
+  if (!summary) return null
+
+  return (
+    <div className="admin-orders-mgmt-summary">
+      <div className="admin-orders-mgmt-summary-card is-paid">
+        <span className="admin-orders-mgmt-summary-label">本月支付</span>
+        <strong>{formatUsd(summary.monthPaymentUsd)}</strong>
+      </div>
+      <div className="admin-orders-mgmt-summary-card is-paid">
+        <span className="admin-orders-mgmt-summary-label">总共支付</span>
+        <strong>{formatUsd(summary.totalPaymentUsd)}</strong>
+      </div>
+      <div className="admin-orders-mgmt-summary-card is-paid">
+        <span className="admin-orders-mgmt-summary-label">今日支付</span>
+        <strong>{formatUsd(summary.todayPaymentUsd)}</strong>
+      </div>
+      <div className="admin-orders-mgmt-summary-card is-vip-inapp">
+        <span className="admin-orders-mgmt-summary-label">本月内购</span>
+        <strong>{formatUsd(summary.monthVipPurchaseUsd)}</strong>
+      </div>
+      <div className="admin-orders-mgmt-summary-card is-vip-inapp">
+        <span className="admin-orders-mgmt-summary-label">总共内购</span>
+        <strong>{formatUsd(summary.totalVipPurchaseUsd)}</strong>
+      </div>
+      <div className="admin-orders-mgmt-summary-card is-vip-inapp">
+        <span className="admin-orders-mgmt-summary-label">今日内购</span>
+        <strong>{formatUsd(summary.todayVipPurchaseUsd)}</strong>
+      </div>
+    </div>
+  )
 }
 
 function OrderStatusBadge({ status }) {
@@ -64,12 +97,13 @@ function OrderStatusBadge({ status }) {
   return <span className={`admin-order-status ${className}`.trim()}>{label}</span>
 }
 
-function PayChannelBadge({ active, label }) {
-  return (
-    <span className={`admin-order-pay-badge ${active ? 'is-active' : ''}`.trim()}>
-      {active ? label : '—'}
-    </span>
-  )
+function sourceLabel(row) {
+  if (row?.pay_vip_purchase || row?.sourceType === 'vip_purchase' || row?.source === 'vip') {
+    return 'VIP 内购'
+  }
+  if (row?.pay_vip_gift || row?.sourceType === 'vip_gift') return 'VIP 内购'
+  if (row?.source === 'vip') return 'VIP 订单'
+  return '支付订单'
 }
 
 export default function OrdersPage() {
@@ -87,31 +121,39 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [refundingId, setRefundingId] = useState('')
+  const [summary, setSummary] = useState(null)
+  const [, setStatusTick] = useState(0)
 
   const loadOrders = useCallback(async ({ showLoading = true } = {}) => {
     if (showLoading) setLoading(true)
     setError('')
+    const filterPayload = {
+      status: appliedFilters.status,
+      payment_method: appliedFilters.paymentMethod,
+      date_from: appliedFilters.dateFrom,
+      date_to: appliedFilters.dateTo,
+      date_field: appliedFilters.dateField,
+      keyword: appliedFilters.keyword,
+      page,
+      pageSize: PAGE_SIZE,
+      t: Date.now(),
+    }
     try {
-      const data = await searchAdminOrdersList({
-        status: appliedFilters.status,
-        payment_method: appliedFilters.paymentMethod,
-        date_from: appliedFilters.dateFrom,
-        date_to: appliedFilters.dateTo,
-        date_field: appliedFilters.dateField,
-        keyword: appliedFilters.keyword,
-        page,
-        pageSize: PAGE_SIZE,
-        t: Date.now(),
-      })
+      const [data, dashboardMetrics] = await Promise.all([
+        searchAdminOrdersList(filterPayload),
+        fetchAdminOrdersDashboardMetrics().catch(() => null),
+      ])
       setRows(data.orders)
       setTotal(data.total)
       setTotalPages(data.totalPages)
+      setSummary(dashboardMetrics)
       setLastFetchedAt(Date.now())
       return true
     } catch (err) {
       setRows([])
       setTotal(0)
       setTotalPages(1)
+      setSummary(null)
       setError(err?.message || '订单加载失败')
       return false
     } finally {
@@ -130,6 +172,13 @@ export default function OrdersPage() {
   useEffect(() => {
     loadOrders()
   }, [loadOrders])
+
+  useEffect(() => {
+    const hasPending = rows.some((row) => resolveOrderDisplayStatus(row) === 'pending')
+    if (!hasPending) return undefined
+    const timer = window.setInterval(() => setStatusTick((value) => value + 1), 10000)
+    return () => window.clearInterval(timer)
+  }, [rows])
 
   useEffect(() => {
     if (!selectedOrder) return undefined
@@ -175,7 +224,7 @@ export default function OrdersPage() {
   const onRefund = async (row) => {
     const id = row?.id || row?.order_no
     if (!id || !row?.can_refund) return
-    if (!window.confirm(`确认将订单 ${row.order_no} 标记为已退款？`)) return
+    if (!window.confirm(`确认将订单 ${row.order_no} 退款？\n退款后将按套餐时长扣减用户 VIP，且不可自动恢复。`)) return
     setRefundingId(id)
     setError('')
     try {
@@ -233,7 +282,7 @@ export default function OrdersPage() {
               <option value="vip_gift">VIP 赠送</option>
             </select>
           </label>
-          <label className="admin-reading-mgmt-field admin-orders-mgmt-field--pay">
+          <label className="admin-reading-mgmt-field admin-orders-mgmt-field--date-field">
             <span>日期依据</span>
             <select
               value={inputFilters.dateField}
@@ -283,6 +332,8 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      <OrdersSummaryBar summary={summary} />
+
       <div className={`admin-novel-mgmt-table-card${refreshing ? ' is-refreshing' : ''}`}>
         <div className="admin-novel-mgmt-table-head">
           <h3>订单管理</h3>
@@ -299,8 +350,6 @@ export default function OrdersPage() {
                 <th>状态</th>
                 <th>时间</th>
                 <th>支付方式</th>
-                <th>ABA</th>
-                <th>PayWay</th>
                 <th>退款</th>
                 <th>详情</th>
               </tr>
@@ -309,6 +358,7 @@ export default function OrdersPage() {
               {rows.length ? (
                 rows.map((row) => {
                   const busy = refundingId === (row.id || row.order_no)
+                  const displayStatus = resolveOrderDisplayStatus(row)
                   return (
                     <tr key={row.id || row.order_no}>
                       <td className="admin-orders-mgmt-order-no">{row.order_no || '—'}</td>
@@ -323,22 +373,16 @@ export default function OrdersPage() {
                       <td className="admin-orders-mgmt-package">{row.package_name || '—'}</td>
                       <td className="admin-novel-mgmt-num">{formatAmount(row.amount)}</td>
                       <td>
-                        <OrderStatusBadge status={row.status} />
+                        <OrderStatusBadge status={displayStatus} />
                       </td>
                       <td className="admin-novel-mgmt-time">
-                        {row.time_label || formatDateTime(row.paid_at || row.created_at)}
+                        {resolveOrderDisplayTime(row, appliedFilters.dateField)}
                       </td>
                       <td>{row.payment_method || '—'}</td>
                       <td>
-                        <PayChannelBadge active={row.pay_aba} label="ABA" />
-                      </td>
-                      <td>
-                        <PayChannelBadge active={row.pay_payway} label="PayWay" />
-                      </td>
-                      <td>
-                        {row.status === 'refunded' ? (
+                        {displayStatus === 'refunded' ? (
                           <span className="admin-orders-mgmt-refund-done">已退款</span>
-                        ) : row.can_refund ? (
+                        ) : row.can_refund && displayStatus === 'paid' ? (
                           <button
                             className="admin-novel-mgmt-act admin-orders-mgmt-refund-btn"
                             type="button"
@@ -366,7 +410,7 @@ export default function OrdersPage() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={11} className="admin-table-empty">
+                  <td colSpan={9} className="admin-table-empty">
                     {loading || refreshing ? '加载中...' : '暂无订单记录'}
                   </td>
                 </tr>
@@ -447,8 +491,16 @@ export default function OrdersPage() {
                 <div>
                   <dt>状态</dt>
                   <dd>
-                    <OrderStatusBadge status={selectedOrder.status} />
+                    <OrderStatusBadge status={resolveOrderDisplayStatus(selectedOrder)} />
                   </dd>
+                </div>
+                <div>
+                  <dt>订单来源</dt>
+                  <dd>{sourceLabel(selectedOrder)}</dd>
+                </div>
+                <div>
+                  <dt>来源类型</dt>
+                  <dd>{selectedOrder.sourceType || selectedOrder.payment_channel || '—'}</dd>
                 </div>
                 <div>
                   <dt>支付方式</dt>

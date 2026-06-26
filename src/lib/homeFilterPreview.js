@@ -55,9 +55,9 @@ export function buildPreviewPanelFromSections(sections) {
   }
 }
 
-export function previewSortOptions(sections) {
-  return enabledSorted(sections?.sort?.items || []).map((it) => ({
-    id: it.id,
-    label: it.label || it.id,
-  }))
-}
+export const DEFAULT_SORT_PREVIEW_OPTIONS = [
+  { id: 'update', label: '最新更新' },
+  { id: 'views', label: '最多阅读' },
+  { id: 'rating', label: '最高评分' },
+  { id: 'publish', label: '最新发布' },
+]

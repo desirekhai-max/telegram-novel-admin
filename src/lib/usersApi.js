@@ -1,6 +1,7 @@
 import { getToken } from './adminAuth.js'
 import { apiUrl, getApiOriginLabel } from './apiBase.js'
 import { humanizeApiError } from './apiErrors.js'
+import { getSettlementStartMs } from './cambodiaTime.js'
 
 async function requestJson(path, { method = 'GET', body, query } = {}) {
   const token = getToken()
@@ -48,10 +49,63 @@ export function isTelegramAppUserRow(row) {
   return true
 }
 
+/** 列表「状态」列：在线 / 离线 / 已封禁（与 VIP 列分离） */
+export function resolveUserPresenceStatus(row) {
+  if (Boolean(row?.isBanned)) {
+    return { label: '已封禁', variant: 'banned' }
+  }
+  if (row?.isOnline === true) {
+    return { label: '在线', variant: 'online' }
+  }
+  return { label: '离线', variant: 'offline' }
+}
+
+/** 与用户管理「状态」列一致：统计当前在线人数（不含已封禁） */
+export function countOnlineUsers(users = []) {
+  if (!Array.isArray(users)) return 0
+  return users.filter((row) => resolveUserPresenceStatus(row).variant === 'online').length
+}
+
+export function hasUserAvatar(row) {
+  return Boolean(String(row?.avatar || row?.photoUrl || '').trim())
+}
+
+/** 今日新增：与用户管理同源，仅含今日注册且有头像的用户 */
+export function getTodayNewUsersFromList(users = [], nowMs = Date.now()) {
+  if (!Array.isArray(users)) return []
+  const startMs = getSettlementStartMs(nowMs)
+  const endMs = startMs + 24 * 60 * 60 * 1000
+  return users
+    .filter(hasUserAvatar)
+    .filter((row) => {
+      const ts = Number(row?.registeredAtMs || 0)
+      return Number.isFinite(ts) && ts >= startMs && ts < endMs
+    })
+    .sort((a, b) => Number(b.registeredAtMs || 0) - Number(a.registeredAtMs || 0))
+}
+
+export function countTodayNewUsersFromList(users = [], nowMs = Date.now()) {
+  return getTodayNewUsersFromList(users, nowMs).length
+}
+
+/** 与用户管理「会员」列一致：VIP / 普通 */
+export function countVipUsers(users = []) {
+  if (!Array.isArray(users)) return 0
+  return users.filter((row) => row?.vipActive === true).length
+}
+
+export function countNormalUsers(users = []) {
+  if (!Array.isArray(users)) return 0
+  return users.filter((row) => row?.vipActive !== true && hasUserAvatar(row)).length
+}
+
 export function normalizeAdminUserRow(row, idx = 0) {
   const tgId = String(row?.tgId || row?.telegramId || row?.userId || row?.id || idx)
   const userType = String(row?.userType || row?.role || 'normal')
   const vipActive = row?.vipActive === true || userType === 'vip'
+  const isBanned = Boolean(row?.isBanned)
+  const isOnline = row?.isOnline === true
+  const presence = resolveUserPresenceStatus({ isBanned, isOnline })
   return {
     id: tgId,
     tgId,
@@ -65,15 +119,16 @@ export function normalizeAdminUserRow(row, idx = 0) {
     commentCount: Number(row?.commentCount) || 0,
     favoriteCount: Number(row?.favoriteCount) || 0,
     readCount: Number(row?.readCount) || 0,
-    statusLabel:
-      row?.statusLabel ||
-      (row?.isBanned ? '已封禁' : userType === 'author' ? '作者' : vipActive ? 'VIP' : row?.isOnline ? '在线' : '普通'),
+    presenceLabel: presence.label,
+    presenceVariant: presence.variant,
+    statusLabel: presence.label,
     userType: userType === 'author' ? 'author' : vipActive ? 'vip' : 'normal',
-    isBanned: Boolean(row?.isBanned),
+    isBanned,
     whitelist: Boolean(row?.whitelist),
-    isOnline: row?.isOnline === true,
+    isOnline,
     ipLocation: row?.ipLocation || '—',
     lastSeenAt: Number(row?.lastSeenAt) || 0,
+    registeredAtMs: Number(row?.registeredAtMs || row?.firstSeenAt || row?.createdAt || 0),
     authVerified: row?.authVerified,
     fromTelegramApp: row?.fromTelegramApp,
   }

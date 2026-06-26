@@ -1,6 +1,23 @@
 import { getLegacyToken } from './adminAuth.js'
+import { apiUrl, resolveApiAssetUrl, stripApiAssetUrl } from './apiBase.js'
 
-const API_BASE = 'https://telegram-novel-app-production-7f1e.up.railway.app'
+export function normalizeNovelAssetRow(row) {
+  if (!row || typeof row !== 'object') return row
+  const coverUrl = row.coverUrl ? resolveApiAssetUrl(row.coverUrl) : ''
+  return { ...row, coverUrl }
+}
+
+export function normalizeNovelAssetPayload(novel) {
+  if (!novel || typeof novel !== 'object') return novel
+  return {
+    ...novel,
+    coverUrl: novel.coverUrl ? resolveApiAssetUrl(novel.coverUrl) : '',
+  }
+}
+
+export function toAdminNovelCoverPath(coverUrl) {
+  return stripApiAssetUrl(coverUrl)
+}
 
 async function requestJson(path, { method = 'GET', body, query } = {}) {
   const token = getLegacyToken()
@@ -13,7 +30,7 @@ async function requestJson(path, { method = 'GET', body, query } = {}) {
   })
   const qs = params.toString()
 
-  const response = await fetch(`${API_BASE}${path}${qs ? `?${qs}` : ''}`, {
+  const response = await fetch(apiUrl(`${path}${qs ? `?${qs}` : ''}`), {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -30,11 +47,17 @@ async function requestJson(path, { method = 'GET', body, query } = {}) {
 }
 
 export async function fetchAdminNovels(query = {}) {
-  return requestJson('/api/admin-legacy/novels', { query })
+  const data = await requestJson('/api/admin-legacy/novels', { query })
+  const items = Array.isArray(data?.items) ? data.items.map(normalizeNovelAssetRow) : []
+  return { ...data, items }
 }
 
 export async function fetchAdminNovel(id) {
-  return requestJson(`/api/admin-legacy/novels/${encodeURIComponent(String(id))}`)
+  const data = await requestJson(`/api/admin-legacy/novels/${encodeURIComponent(String(id))}`)
+  if (data?.novel) {
+    return { ...data, novel: normalizeNovelAssetPayload(data.novel) }
+  }
+  return data
 }
 
 export async function createAdminNovel(body) {
@@ -48,6 +71,13 @@ export async function updateAdminNovel(id, body) {
   })
 }
 
+export async function updateAdminNovelVisibility(id, visibility) {
+  return requestJson(`/api/admin-legacy/novels/${encodeURIComponent(String(id))}/visibility`, {
+    method: 'PATCH',
+    body: { visibility },
+  })
+}
+
 export async function deleteAdminNovel(id) {
   return requestJson(`/api/admin-legacy/novels/${encodeURIComponent(String(id))}`, {
     method: 'DELETE',
@@ -58,7 +88,7 @@ export async function uploadNovelCover({ dataUrl, previousCoverUrl = '' }) {
   const token = getLegacyToken()
   if (!token) throw new Error('需要 Legacy 管理员权限，请重新登录')
 
-  const response = await fetch(`${API_BASE}/api/admin-legacy/novels/cover-upload`, {
+  const response = await fetch(apiUrl('/api/admin-legacy/novels/cover-upload'), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -81,7 +111,7 @@ export async function deleteNovelCoverFile(coverUrl) {
   const token = getLegacyToken()
   if (!token) throw new Error('需要 Legacy 管理员权限，请重新登录')
 
-  const response = await fetch(`${API_BASE}/api/admin-legacy/novels/cover-upload`, {
+  const response = await fetch(apiUrl('/api/admin-legacy/novels/cover-upload'), {
     method: 'DELETE',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -114,6 +144,13 @@ export async function updateAdminChapter(novelId, chapterIndex, body) {
   return requestJson(
     `/api/admin-legacy/chapters/${encodeURIComponent(String(novelId))}/${chapterIndex}`,
     { method: 'PUT', body },
+  )
+}
+
+export async function moveAdminChapter(novelId, chapterIndex, direction) {
+  return requestJson(
+    `/api/admin-legacy/chapters/${encodeURIComponent(String(novelId))}/${chapterIndex}/move`,
+    { method: 'PATCH', body: { direction } },
   )
 }
 

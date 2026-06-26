@@ -1,6 +1,20 @@
-const API_BASE =
-  import.meta.env.VITE_API_BASE ??
-  'https://telegram-novel-app-production-7f1e.up.railway.app'
+import { apiUrl } from './apiBase.js'
+import { humanizeApiError } from './apiErrors.js'
+import { fetchAdminDashboardPayload } from './dashboardApi.js'
+import {
+  fetchAdminOrderDetail,
+  fetchAdminOrdersList,
+  fetchAdminOrdersSummary as loadAdminOrdersSummary,
+  refundAdminOrderById,
+  searchAdminOrdersList,
+} from './ordersApi.js'
+import { fetchAdminReadingRecords } from './readingRecordsApi.js'
+import {
+  fetchAdminReports as loadAdminReports,
+  patchAdminReportStatus,
+} from './reportsApi.js'
+import { postAdminUserAction, fetchAdminUserProfileDetail, postAdminUserVipPurchase } from './userProfileApi.js'
+import { fetchAdminUsers, patchAdminUserFlags } from './usersApi.js'
 
 function buildQuery(params = {}) {
   const query = new URLSearchParams()
@@ -17,14 +31,15 @@ async function requestJson(path, { token, method = 'GET', body, query } = {}) {
   if (token) headers.Authorization = `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const response = await fetch(`${API_BASE}${path}${buildQuery(query)}`, {
+  const response = await fetch(apiUrl(`${path}${buildQuery(query)}`), {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new Error(data?.error || `请求失败(${response.status})`)
+    const raw = data?.error || `请求失败(${response.status})`
+    throw new Error(humanizeApiError(raw, `请求失败(${response.status})`))
   }
   return data
 }
@@ -60,14 +75,20 @@ export async function fetchHomeStats({ from, to }) {
   return fetchPresenceStats({ from, to })
 }
 
-export async function fetchReports({ token }) {
-  const data = await requestJson('/api/admin/reports', { token })
-  return extractItems(data)
+export async function fetchReports({ token } = {}) {
+  void token
+  return loadAdminReports()
 }
 
-export async function fetchReadingRecords({ token }) {
-  const data = await requestJson('/api/admin-legacy/reading-records', { token })
-  return extractItems(data)
+export async function updateReportStatus({ token, novelId, reportId, status }) {
+  void token
+  return patchAdminReportStatus({ novelId, reportId, status })
+}
+
+export async function fetchReadingRecords({ token } = {}) {
+  void token
+  const result = await fetchAdminReadingRecords()
+  return result.rows
 }
 
 export async function fetchMemberIps({ token }) {
@@ -133,30 +154,38 @@ export async function fetchAdminOrders({
   page = 1,
   pageSize = 50,
 } = {}) {
-  return requestJson('/api/admin/orders', {
-    token,
-    query: {
-      status,
-      payment_method: paymentMethod,
-      date_from: dateFrom,
-      date_to: dateTo,
-      keyword,
-      page,
-      pageSize,
-    },
+  void token
+  return fetchAdminOrdersList({
+    status,
+    paymentMethod,
+    dateFrom,
+    dateTo,
+    keyword,
+    page,
+    pageSize,
   })
 }
 
 export async function searchAdminOrders({ token, filters = {} } = {}) {
-  return requestJson('/api/admin/orders/search', {
-    token,
-    method: 'POST',
-    body: filters,
-  })
+  void token
+  return searchAdminOrdersList(filters)
+}
+
+export async function refundAdminOrder({ token, id }) {
+  void token
+  const order = await refundAdminOrderById(id)
+  return { ok: true, order }
 }
 
 export async function fetchAdminOrderById({ token, id }) {
-  return requestJson(`/api/admin/orders/${encodeURIComponent(String(id))}`, { token })
+  void token
+  const order = await fetchAdminOrderDetail(id)
+  return { ok: true, order }
+}
+
+export async function fetchAdminOrdersSummaryReport({ token, filters = {} } = {}) {
+  void token
+  return loadAdminOrdersSummary(filters)
 }
 
 /** @deprecated Use fetchAdminOrders or searchAdminOrders */
@@ -195,16 +224,42 @@ function extractOrders(data) {
   return []
 }
 
-export async function fetchUsers({ token }) {
-  return requestJson('/api/users', {
+export async function fetchUsers({ token } = {}) {
+  void token
+  const users = await fetchAdminUsers()
+  return { ok: true, users }
+}
+
+export async function fetchAdminDashboard({ token } = {}) {
+  void token
+  return fetchAdminDashboardPayload()
+}
+
+export async function fetchAdminUserProfile({ token, tgId } = {}) {
+  void token
+  return fetchAdminUserProfileDetail(tgId)
+}
+
+export async function adminUserVipPurchase({ token, tgId, planId } = {}) {
+  void token
+  return postAdminUserVipPurchase(tgId, { planId })
+}
+
+export async function adminUserAction({ token, tgId, action, ...rest } = {}) {
+  void token
+  return postAdminUserAction(tgId, { action, ...rest })
+}
+
+export async function manualVipAdjust({ token, tgId, payload }) {
+  return adminUserAction({
     token,
+    tgId,
+    action: 'manual_vip_adjust',
+    ...payload,
   })
 }
 
 export async function updateUserFlags({ token, userId, patch }) {
-  return requestJson(`/api/users/${encodeURIComponent(String(userId))}/flags`, {
-    token,
-    method: 'PATCH',
-    body: patch,
-  })
+  void token
+  return patchAdminUserFlags(userId, patch)
 }

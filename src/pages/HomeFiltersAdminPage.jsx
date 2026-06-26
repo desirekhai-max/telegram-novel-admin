@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { hasLegacyToken } from '../lib/adminAuth.js'
-import { fetchAdminAppFilters, saveAdminAppFilterSection, SECTIONS } from '../lib/appFiltersAdminApi.js'
-import LegacyRequiredNotice from '../components/LegacyRequiredNotice.jsx'
+import { fetchAdminAppFilters, getApiOriginLabel, getAppFiltersReadSourceLabel, saveAdminAppFilterSection, SECTIONS } from '../lib/appFiltersAdminApi.js'
 import HomeFilterPreviewPanel from '../components/HomeFilterPreviewPanel.jsx'
 
 const SIDE_TABS = [
@@ -9,7 +7,6 @@ const SIDE_TABS = [
   { key: 'tags', label: '标签管理' },
   { key: 'status', label: '状态管理' },
   { key: 'wordRanges', label: '字数区间管理' },
-  { key: 'sort', label: '排序管理' },
 ]
 
 const TAB_META = {
@@ -17,7 +14,6 @@ const TAB_META = {
   tags: { title: '标签管理', addBtn: '新增标签', nameCol: '标签名称' },
   status: { title: '状态管理', addBtn: '新增状态', nameCol: '名称' },
   wordRanges: { title: '字数区间管理', addBtn: '新增字数区间', nameCol: '名称' },
-  sort: { title: '排序管理', addBtn: '新增排序项', nameCol: '名称' },
 }
 
 function reindexSort(items) {
@@ -46,13 +42,6 @@ function newItemId(section, label, existingIds) {
     if (text.includes('30-50万') || (text.includes('30') && text.includes('50') && text.includes('-'))) return 'w_30_50'
     if (text.includes('50-100万') || (text.includes('50') && text.includes('100') && text.includes('-'))) return 'w_50_100'
     if (text.includes('100万') && (text.includes('以上') || text.includes('上'))) return 'w_gt_100'
-  }
-
-  if (section === 'sort') {
-    if (text === 'update' || text.includes('最新更新')) return 'update'
-    if (text === 'views' || text.includes('最多阅读')) return 'views'
-    if (text === 'rating' || text.includes('最高评分')) return 'rating'
-    if (text === 'publish' || text.includes('最新发布')) return 'publish'
   }
 
   if (section === 'genres') {
@@ -88,6 +77,46 @@ function newItemId(section, label, existingIds) {
     id = `${ascii || 'opt'}_${n++}`
   }
   return id
+}
+
+function DeleteConfirmModal({ open, title, labels, onClose, onConfirm }) {
+  if (!open) return null
+  const preview = Array.isArray(labels) ? labels.filter(Boolean) : []
+  const shown = preview.slice(0, 8)
+  const rest = preview.length - shown.length
+
+  return (
+    <div
+      className="admin-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-hfilter-delete-title"
+      onClick={onClose}
+    >
+      <div className="admin-modal-card admin-filters-mgmt-delete-modal" onClick={(e) => e.stopPropagation()}>
+        <p className="admin-modal-title" id="admin-hfilter-delete-title">
+          {title}
+        </p>
+        <p className="admin-filters-mgmt-delete-text">删除后需点击底部「保存所有更改」才会同步到 APP。</p>
+        {shown.length ? (
+          <ul className="admin-filters-mgmt-delete-list">
+            {shown.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+            {rest > 0 ? <li className="admin-filters-mgmt-delete-more">…还有 {rest} 项</li> : null}
+          </ul>
+        ) : null}
+        <div className="admin-modal-actions">
+          <button className="admin-btn admin-modal-btn-cancel" type="button" onClick={onClose}>
+            取消
+          </button>
+          <button className="admin-btn admin-filters-mgmt-delete-confirm" type="button" onClick={onConfirm}>
+            确认删除
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ItemEditorModal({ open, title, initial, onClose, onConfirm }) {
@@ -142,7 +171,6 @@ function ItemEditorModal({ open, title, initial, onClose, onConfirm }) {
 }
 
 export default function HomeFiltersAdminPage() {
-  const hasLegacy = hasLegacyToken()
   const [tab, setTab] = useState('genres')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -153,13 +181,14 @@ export default function HomeFiltersAdminPage() {
     tags: { items: [] },
     status: { items: [] },
     wordRanges: { items: [] },
-    sort: { items: [] },
   })
   const [snapshot, setSnapshot] = useState(null)
   const [editor, setEditor] = useState({ open: false, mode: 'create', index: -1 })
+  const [selectedIds, setSelectedIds] = useState([])
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, ids: [] })
+  const [readSourceLabel, setReadSourceLabel] = useState('')
 
   const loadAll = useCallback(async () => {
-    if (!hasLegacy) return
     setLoading(true)
     setError('')
     try {
@@ -170,12 +199,13 @@ export default function HomeFiltersAdminPage() {
       }
       setSections(next)
       setSnapshot(JSON.stringify(next))
+      setReadSourceLabel(getAppFiltersReadSourceLabel())
     } catch (err) {
       setError(err?.message || '加载筛选配置失败')
     } finally {
       setLoading(false)
     }
-  }, [hasLegacy])
+  }, [])
 
   useEffect(() => {
     loadAll()
@@ -183,10 +213,54 @@ export default function HomeFiltersAdminPage() {
 
   const meta = TAB_META[tab]
   const items = sections[tab]?.items || []
+  const selectableItems = useMemo(() => items.filter((row) => row.id !== 'all'), [items])
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const allSelected =
+    selectableItems.length > 0 && selectableItems.every((row) => selectedSet.has(row.id))
 
   const setItems = (nextItems) => {
     setSections((p) => ({ ...p, [tab]: { items: reindexSort(nextItems) } }))
   }
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return [...next]
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds([])
+      return
+    }
+    setSelectedIds(selectableItems.map((row) => row.id))
+  }
+
+  const openDeleteConfirm = (ids) => {
+    const uniqueIds = [...new Set(ids.filter(Boolean))]
+    if (!uniqueIds.length) return
+    setDeleteConfirm({ open: true, ids: uniqueIds })
+  }
+
+  const confirmDelete = () => {
+    const idSet = new Set(deleteConfirm.ids)
+    if (!idSet.size) {
+      setDeleteConfirm({ open: false, ids: [] })
+      return
+    }
+    setItems(items.filter((row) => !idSet.has(row.id)))
+    setSelectedIds((prev) => prev.filter((id) => !idSet.has(id)))
+    setDeleteConfirm({ open: false, ids: [] })
+    setError('')
+  }
+
+  const deletePreviewLabels = useMemo(() => {
+    const idSet = new Set(deleteConfirm.ids)
+    return items.filter((row) => idSet.has(row.id)).map((row) => row.label)
+  }, [deleteConfirm.ids, items])
 
   const move = (index, dir) => {
     const next = [...items]
@@ -229,34 +303,32 @@ export default function HomeFiltersAdminPage() {
     return JSON.stringify(sections) !== snapshot
   }, [sections, snapshot])
 
-  if (!hasLegacy) {
-    return <LegacyRequiredNotice />
-  }
+  const dataSourceHint = useMemo(() => {
+    const parts = [`数据源 ${getApiOriginLabel()}`]
+    if (readSourceLabel) parts.push(`读取自 ${readSourceLabel}`)
+    return parts.join(' · ')
+  }, [readSourceLabel])
 
   return (
-    <section className="admin-hfilter-page">
-      <header className="admin-hfilter-header">
-        <div>
-          <p className="admin-panel-kicker">APP配置</p>
-          <h2 className="admin-panel-heading">首页筛选管理</h2>
-          <p className="admin-panel-desc">配置 APP 首页筛选项，保存后 APP 将自动同步更新</p>
-        </div>
-      </header>
+    <section className="admin-panel admin-filters-mgmt">
+      {error ? <p className="admin-error admin-filters-mgmt-alert">{error}</p> : null}
+      {message ? <p className="admin-success admin-filters-mgmt-alert">{message}</p> : null}
+      <p className="admin-novel-mgmt-meta admin-filters-mgmt-meta">{dataSourceHint}</p>
 
-      {error ? <p className="admin-error admin-hfilter-alert">{error}</p> : null}
-      {message ? <p className="admin-success admin-hfilter-alert">{message}</p> : null}
-
-      <div className="admin-hfilter-body">
-        <nav className="admin-hfilter-side" aria-label="筛选分类">
+      <div className="admin-filters-mgmt-body">
+        <nav className="admin-filters-mgmt-side" aria-label="筛选分类">
           {SIDE_TABS.map((t) => (
             <button
               key={t.key}
               type="button"
-              className={['admin-hfilter-side__item', tab === t.key ? 'admin-hfilter-side__item--active' : ''].join(
-                ' ',
-              )}
+              className={[
+                'admin-filters-mgmt-side__item',
+                tab === t.key ? 'admin-filters-mgmt-side__item--active' : '',
+              ].join(' ')}
               onClick={() => {
                 setTab(t.key)
+                setSelectedIds([])
+                setDeleteConfirm({ open: false, ids: [] })
                 setError('')
               }}
             >
@@ -265,22 +337,49 @@ export default function HomeFiltersAdminPage() {
           ))}
         </nav>
 
-        <main className="admin-hfilter-main">
-          <div className="admin-hfilter-main__toolbar">
-            <h3 className="admin-hfilter-main__title">{meta.title}</h3>
-            <button
-              className="admin-btn admin-btn-primary"
-              type="button"
-              onClick={() => setEditor({ open: true, mode: 'create', index: -1 })}
-            >
-              + {meta.addBtn}
-            </button>
-          </div>
+        <div className="admin-filters-mgmt-center">
+          <div className="admin-novel-mgmt-table-card">
+            <div className="admin-novel-mgmt-table-head admin-filters-mgmt-table-head">
+              <div>
+                <h3>{meta.title}</h3>
+                <span className="admin-novel-mgmt-meta">
+                  {items.length} 项{dirty ? ' · 有未保存更改' : ''}
+                </span>
+              </div>
+              <div className="admin-filters-mgmt-table-head-actions">
+                {selectedIds.length ? (
+                  <button
+                    className="admin-btn admin-filters-mgmt-batch-delete"
+                    type="button"
+                    onClick={() => openDeleteConfirm(selectedIds)}
+                  >
+                    删除选中 ({selectedIds.length})
+                  </button>
+                ) : null}
+                <button
+                  className="admin-btn admin-btn-primary"
+                  type="button"
+                  onClick={() => setEditor({ open: true, mode: 'create', index: -1 })}
+                >
+                  + {meta.addBtn}
+                </button>
+              </div>
+            </div>
 
-          <div className="admin-table-wrap admin-hfilter-table-wrap">
-            <table className="admin-table admin-hfilter-table">
+            <div className="admin-table-wrap admin-filters-mgmt-table-wrap">
+              <table className="admin-table admin-filters-mgmt-table">
               <thead>
                 <tr>
+                  <th className="admin-hfilter-col-check">
+                    <input
+                      className="admin-filters-mgmt-check"
+                      type="checkbox"
+                      checked={allSelected}
+                      disabled={!selectableItems.length}
+                      onChange={toggleSelectAll}
+                      aria-label="全选"
+                    />
+                  </th>
                   <th className="admin-hfilter-col-seq">序号</th>
                   <th>{meta.nameCol}</th>
                   <th className="admin-hfilter-col-status">状态</th>
@@ -290,13 +389,26 @@ export default function HomeFiltersAdminPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={4} className="admin-table-empty">
+                    <td colSpan={5} className="admin-table-empty">
                       加载中...
                     </td>
                   </tr>
                 ) : items.length ? (
-                  items.map((row, index) => (
-                    <tr key={row.id}>
+                  items.map((row, index) => {
+                    const canSelect = row.id !== 'all'
+                    const checked = selectedSet.has(row.id)
+                    return (
+                    <tr key={row.id} className={checked ? 'admin-filters-mgmt-row--selected' : undefined}>
+                      <td className="admin-hfilter-col-check">
+                        <input
+                          className="admin-filters-mgmt-check"
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!canSelect}
+                          onChange={() => toggleSelect(row.id)}
+                          aria-label={`选择 ${row.label}`}
+                        />
+                      </td>
                       <td>
                         <span className="admin-hfilter-seq">{index + 1}</span>
                       </td>
@@ -352,8 +464,7 @@ export default function HomeFiltersAdminPage() {
                             disabled={row.id === 'all'}
                             onClick={() => {
                               if (row.id === 'all') return
-                              if (!window.confirm(`确定删除「${row.label}」？`)) return
-                              setItems(items.filter((r) => r.id !== row.id))
+                              openDeleteConfirm([row.id])
                             }}
                           >
                             删除
@@ -361,34 +472,50 @@ export default function HomeFiltersAdminPage() {
                         </div>
                       </td>
                     </tr>
-                  ))
+                  )})
                 ) : (
                   <tr>
-                    <td colSpan={4} className="admin-table-empty">
+                    <td colSpan={5} className="admin-table-empty">
                       暂无数据，点击上方按钮新增
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+            </div>
 
-          <p className="admin-hfilter-tip">
-            提示：点击 ↑ ↓ 调整显示顺序；序号越小越靠前。修改后请点击底部「保存所有更改」生效。
-          </p>
-        </main>
+            <p className="admin-filters-mgmt-tip">
+              勾选后可批量删除；点击 ↑ ↓ 调整显示顺序。修改后请点击底部「保存所有更改」生效。
+            </p>
+          </div>
+        </div>
 
         <HomeFilterPreviewPanel sections={sections} />
       </div>
 
-      <footer className="admin-hfilter-footer">
-        <button className="admin-btn admin-btn-primary" type="button" disabled={saving} onClick={onSaveAll}>
-          {saving ? '保存中...' : '保存所有更改'}
-        </button>
-        <button className="admin-btn admin-hfilter-btn-reset" type="button" disabled={!dirty} onClick={onReset}>
-          重置
-        </button>
-      </footer>
+      <div className="admin-reading-mgmt-toolbar admin-filters-mgmt-footer">
+        <p className="admin-filters-mgmt-footer-note">保存后 APP 将自动同步最新筛选配置</p>
+        <div className="admin-reading-mgmt-actions">
+          <button className="admin-btn admin-btn-primary" type="button" disabled={saving} onClick={onSaveAll}>
+            {saving ? '保存中...' : '保存所有更改'}
+          </button>
+          <button className="admin-btn" type="button" disabled={!dirty} onClick={onReset}>
+            重置
+          </button>
+        </div>
+      </div>
+
+      <DeleteConfirmModal
+        open={deleteConfirm.open}
+        title={
+          deleteConfirm.ids.length > 1
+            ? `确认删除选中的 ${deleteConfirm.ids.length} 项？`
+            : '确认删除该项？'
+        }
+        labels={deletePreviewLabels}
+        onClose={() => setDeleteConfirm({ open: false, ids: [] })}
+        onConfirm={confirmDelete}
+      />
 
       <ItemEditorModal
         open={editor.open}

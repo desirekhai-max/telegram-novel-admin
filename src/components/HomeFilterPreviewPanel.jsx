@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { buildPreviewPanelFromSections, previewSortOptions } from '../lib/homeFilterPreview.js'
+import { buildPreviewPanelFromSections, DEFAULT_SORT_PREVIEW_OPTIONS } from '../lib/homeFilterPreview.js'
 
 const PREVIEW_PICKS = {
   genre: 'all',
@@ -10,7 +10,7 @@ const PREVIEW_PICKS = {
 
 export default function HomeFilterPreviewPanel({ sections }) {
   const panel = useMemo(() => buildPreviewPanelFromSections(sections), [sections])
-  const sortOptions = useMemo(() => previewSortOptions(sections), [sections])
+  const sortOptions = DEFAULT_SORT_PREVIEW_OPTIONS
   const [picks, setPicks] = useState(PREVIEW_PICKS)
 
   const pickSingle = (key, value) => {
@@ -29,7 +29,7 @@ export default function HomeFilterPreviewPanel({ sections }) {
   return (
     <aside className="admin-hfilter-preview">
       <h3 className="admin-hfilter-preview__title">APP 预览</h3>
-      <p className="admin-hfilter-preview__sub">首页筛选弹窗效果（修改左侧列表后即时更新）</p>
+      <p className="admin-hfilter-preview__sub">筛选弹窗效果（修改左侧列表后即时更新）</p>
 
       <div className="admin-hfilter-phone">
         <div className="admin-hfilter-phone__bar" />

@@ -18,6 +18,27 @@ body {
   display: grid;
   place-items: center;
   padding: 24px;
+  background: url('/login-background.png') center center / cover no-repeat;
+}
+
+/* 登录页 Logo：1:1 正圆裁剪，禁止拉伸变形 */
+.admin-login-logo {
+  width: 32px;
+  height: 32px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.admin-login-logo-img,
+.admin-login-logo > img,
+img.admin-login-logo-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .admin-login-card {
